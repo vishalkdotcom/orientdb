@@ -69,6 +69,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.zip.CRC32;
 
 /**
+ * Write part of the disk cache which is used to collect
+ *
  * @author Andrey Lomakin
  * @since 7/23/13
  */
@@ -102,6 +104,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private final HashMap<PageKey, OLogSequenceNumber>      localDirtyPages      = new HashMap<PageKey, OLogSequenceNumber>();
   private final TreeMap<OLogSequenceNumber, Set<PageKey>> localDirtyPagesByLSN = new TreeMap<OLogSequenceNumber, Set<PageKey>>();
+
+  private final long[] chunkCounters = new long[CHUNK_SIZE];
+  private final long[] chunkTimes    = new long[CHUNK_SIZE];
 
   /**
    * Amount of pages which were booked in file but were not flushed yet.
@@ -1058,6 +1063,25 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         counter++;
       }
 
+      long chunkTotal = 0;
+      for (int i = 0; i < chunkCounters.length; i++) {
+        chunkTotal += chunkCounters[i];
+      }
+
+      System.out.println("Chunk statistics");
+      for (int i = 0; i < CHUNK_SIZE; i++) {
+        if (chunkCounters[i] == 0) {
+          System.out.println("Chunk with length " + i + " was never flushed");
+        } else {
+          long avgSpeed = chunkTimes[i] / chunkCounters[i];
+          int percent = (int) ((chunkCounters[i] * 100) / chunkTotal);
+
+          System.out.println(
+              "Chunk with length " + i + " was flushed with avg. latency " + avgSpeed + " ns. such chunk was detected " + percent
+                  + "% from total flushes");
+        }
+      }
+
       return ds;
     } finally {
       filesLock.releaseWriteLock();
@@ -1900,7 +1924,12 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     OClosableEntry<Long, OFileClassic> fileEntry = files.acquire(firstFileId);
     try {
       OFileClassic file = fileEntry.get();
+      final long startTime = System.nanoTime();
       file.write(firstPageIndex * pageSize, buffers);
+      final long endTime = System.nanoTime();
+
+      chunkCounters[buffers.length]++;
+      chunkTimes[buffers.length] += (endTime - startTime);
     } catch (IOException e) {
       final File storageDir = new File(storagePath);
 
