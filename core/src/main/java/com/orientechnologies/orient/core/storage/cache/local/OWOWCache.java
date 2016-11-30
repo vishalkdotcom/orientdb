@@ -1071,13 +1071,13 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       System.out.println("Chunk statistics");
       for (int i = 0; i < CHUNK_SIZE; i++) {
         if (chunkCounters[i] == 0) {
-          System.out.println("Chunk with length " + i + " was never flushed");
+          System.out.println("Chunk with length " + (i + 1) + " was never flushed");
         } else {
           long avgSpeed = chunkTimes[i] / chunkCounters[i];
           int percent = (int) ((chunkCounters[i] * 100) / chunkTotal);
 
           System.out.println(
-              "Chunk with length " + i + " was flushed with avg. latency " + avgSpeed + " ns. such chunk was detected " + percent
+              "Chunk with length " + (i + 1) + " was flushed with avg. latency " + avgSpeed + " ns. such chunk was detected " + percent
                   + "% from total flushes");
         }
       }
@@ -1863,7 +1863,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
           if (chunk.isEmpty()) {
             chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
           } else {
-            if (lastFileId != pointer.getFileId() || lastPageIndex != pointer.getPageIndex()) {
+            if (lastFileId != pointer.getFileId() || lastPageIndex != pointer.getPageIndex() - 1) {
               flushedPages += flushPagesChunk(chunk);
               releaseExclusiveLatch();
 
@@ -1928,8 +1928,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       file.write(firstPageIndex * pageSize, buffers);
       final long endTime = System.nanoTime();
 
-      chunkCounters[buffers.length]++;
-      chunkTimes[buffers.length] += (endTime - startTime);
+      chunkCounters[buffers.length - 1]++;
+      chunkTimes[buffers.length - 1] += (endTime - startTime);
     } catch (IOException e) {
       final File storageDir = new File(storagePath);
 
@@ -2055,7 +2055,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
           if (chunk.isEmpty()) {
             chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
           } else {
-            if (lastFileId != pointer.getFileId() || lastPageIndex != pointer.getPageIndex()) {
+            if (lastFileId != pointer.getFileId() || lastPageIndex != pointer.getPageIndex() - 1) {
               flushedPages += flushPagesChunk(chunk);
               releaseExclusiveLatch();
 
