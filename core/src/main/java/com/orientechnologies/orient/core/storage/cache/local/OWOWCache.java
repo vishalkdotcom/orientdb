@@ -505,7 +505,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   @Override
   public void updateDirtyPagesTable(OCachePointer pointer) throws IOException {
-    if (writeAheadLog == null || pointer.isInWriteCache())
+    if (writeAheadLog == null)
       return;
 
     final long fileId = pointer.getFileId();
@@ -708,7 +708,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     dataPointer.setWritersListener(this);
     dataPointer.incrementWritersReferrer();
-    dataPointer.setInWriteCache(true);
   }
 
   @Override
@@ -1891,7 +1890,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
             copy.put(buffer);
 
             removeFromDirtyPages(pageKey);
-            pointer.setInWriteCache(false);
           } finally {
             pointer.releaseSharedLock();
           }
@@ -2083,7 +2081,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
             copy.put(buffer);
 
             removeFromDirtyPages(pageKey);
-            pointer.setInWriteCache(false);
           } finally {
             pointer.releaseSharedLock();
           }
@@ -2150,7 +2147,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
             flushPage(pageKey.fileId, pageKey.pageIndex, buffer);
 
             removeFromDirtyPages(pageKey);
-            pagePointer.setInWriteCache(false);
           } finally {
             pagePointer.releaseSharedLock();
           }
@@ -2213,7 +2209,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
             writeCacheSize.decrement();
 
             removeFromDirtyPages(pageKey);
-            pagePointer.setInWriteCache(false);
           } finally {
             pagePointer.releaseExclusiveLock();
           }
