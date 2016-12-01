@@ -182,7 +182,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   }
 
   public void open(final String iUserName, final String iUserPassword, final Map<String, Object> iProperties) {
-    OLogManager.instance().error(this, "YCSB freeze version 7");
+    OLogManager.instance().error(this, "YCSB freeze version 8");
 
     stateLock.acquireReadLock();
     try {
@@ -336,7 +336,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   }
 
   public void create(final Map<String, Object> iProperties) {
-    OLogManager.instance().error(this, "YCSB freeze version 7");
+    OLogManager.instance().error(this, "YCSB freeze version 8");
 
     stateLock.acquireWriteLock();
     try {
