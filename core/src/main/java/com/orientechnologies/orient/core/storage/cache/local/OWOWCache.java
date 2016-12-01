@@ -1786,7 +1786,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     //first we try to find page which contains the oldest not flushed changes
     //that is needed to allow to compact WAL as earlier as possible
     convertSharedDirtyPagesToLocal();
-    final Map.Entry<OLogSequenceNumber, Set<PageKey>> firstMinLSNEntry = localDirtyPagesByLSN.firstEntry();
+    Map.Entry<OLogSequenceNumber, Set<PageKey>> firstMinLSNEntry = localDirtyPagesByLSN.firstEntry();
     final long startTs = System.nanoTime();
 
     if (firstMinLSNEntry != null) {
@@ -1816,6 +1816,12 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       try {
         while (chunk.size() < CHUNK_SIZE && (endTs - startTs < backgroundFlushInterval)) {
+          firstMinLSNEntry = localDirtyPagesByLSN.firstEntry();
+          if (firstMinLSNEntry != null) {
+            final PageKey minPageKey = firstMinLSNEntry.getValue().iterator().next();
+            pageIterator = writeCachePages.tailMap(minPageKey).entrySet().iterator();
+          }
+
           //if we reached first part of the ring, swap iterator to next part of the ring
           if (!pageIterator.hasNext()) {
             flushedPages += flushPagesChunk(chunk);
