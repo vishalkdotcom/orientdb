@@ -172,6 +172,12 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private final OByteBufferPool bufferPool;
 
+  private long lsnFlushTime = 0;
+
+  private long exclusivePagesFlushTime = 0;
+
+  private long logLSNFlushTime = 0;
+
   /**
    * Listeners which are called when exception in background data flush thread is happened.
    */
@@ -1082,6 +1088,15 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         }
       }
 
+
+      long totalFlushTime = (lsnFlushTime + exclusivePagesFlushTime);
+      if (totalFlushTime > 0) {
+        System.out.println("Distribution of flushes");
+        System.out.println("LSN flush time : " + (100 * lsnFlushTime / totalFlushTime));
+        System.out.println("WAL flush time : " + (100 * logLSNFlushTime / totalFlushTime));
+        System.out.println("Exclusive flush time : " + (100 * exclusivePagesFlushTime / totalFlushTime));
+      }
+
       return ds;
     } finally {
       filesLock.releaseWriteLock();
@@ -1661,7 +1676,11 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       while (minDirtyLSN.getSegment() < segmentId) {
         flushExclusivePagesIfNeeded(0);
 
+        final long start = System.nanoTime();
         flushWriteCacheFromMinLSN();
+        final long end = System.nanoTime();
+
+        lsnFlushTime += (end - start);
 
         firstEntry = localDirtyPagesByLSN.firstEntry();
         if (firstEntry == null)
@@ -1673,6 +1692,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   private final class PeriodicFlushTask implements Runnable {
+    private boolean lsnFlushIsStarted = false;
+
     @Override
     public void run() {
       final OSessionStoragePerformanceStatistic statistic = performanceStatisticManager.getSessionPerformanceStatistic();
@@ -1685,8 +1706,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
           return;
         }
 
-        final long startTs = System.nanoTime();
-
         // cache is split on two types of buffers
         //
         // 1) buffer which contains pages are shared with read buffer
@@ -1694,7 +1713,33 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         //
         // last type of buffer usually small and if it is close to overflow we should flush it first
         flushedPages = flushExclusivePagesIfNeeded(flushedPages);
-        flushedPages += flushWriteCacheFromMinLSN();
+
+        if (writeAheadLog != null) {
+          if (!lsnFlushIsStarted) {
+            if (writeAheadLog.size() >= 2 * 1024L * 1024 * 1024) {
+              final long start = System.nanoTime();
+              flushedPages += flushWriteCacheFromMinLSN();
+              final long end = System.nanoTime();
+
+              logLSNFlushTime += (end - start);
+              lsnFlushTime += (end - start);
+
+              lsnFlushIsStarted = true;
+            } else {
+              if (writeAheadLog.size() <= 1024L * 1024 * 1024) {
+                lsnFlushIsStarted = false;
+              } else {
+                final long start = System.nanoTime();
+                flushedPages += flushWriteCacheFromMinLSN();
+                final long end = System.nanoTime();
+
+                logLSNFlushTime += (end - start);
+                lsnFlushTime += (end - start);
+              }
+            }
+          }
+        }
+
       } catch (IOException e) {
         OLogManager.instance().error(this, "Exception during data flush", e);
         OWOWCache.this.fireBackgroundDataProcessingExceptionEvent(e);
@@ -1800,7 +1845,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       assert chunk.isEmpty();
 
       Iterator<Map.Entry<PageKey, OCachePointer>> pageIterator;
-      final Map.Entry<OLogSequenceNumber, Set<PageKey>>  firstMinLSNEntry = localDirtyPagesByLSN.firstEntry();
+      final Map.Entry<OLogSequenceNumber, Set<PageKey>> firstMinLSNEntry = localDirtyPagesByLSN.firstEntry();
 
       if (firstMinLSNEntry != null) {
         final PageKey minPageKey = firstMinLSNEntry.getValue().iterator().next();
@@ -1808,7 +1853,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       } else
         pageIterator = writeCachePages.entrySet().iterator();
 
-      if(!pageIterator.hasNext()) {
+      if (!pageIterator.hasNext()) {
         pageIterator = writeCachePages.entrySet().iterator();
       }
 
@@ -1984,6 +2029,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   private int flushExclusiveWriteCache() throws IOException {
+    final long start = System.nanoTime();
+
     Iterator<PageKey> iterator = exclusiveWritePages.iterator();
 
     int flushedPages = 0;
@@ -2067,6 +2114,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     }
 
     releaseExclusiveLatch();
+    final long end = System.nanoTime();
+
+    exclusivePagesFlushTime += (end - start);
     return flushedPages;
   }
 
