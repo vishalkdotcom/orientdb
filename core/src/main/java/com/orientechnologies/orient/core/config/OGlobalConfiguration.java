@@ -199,7 +199,7 @@ public enum OGlobalConfiguration {
   WAL_MAX_SIZE("storage.wal.maxSize",
       "Maximum size of WAL on disk (in megabytes), -1 means that WAL may occupy half of the disk space", Integer.class, -1),
 
-  WAL_COMMIT_TIMEOUT("storage.wal.commitTimeout", "Maximum interval between WAL commits (in ms.)", Integer.class, 1000),
+  WAL_COMMIT_TIMEOUT("storage.wal.commitTimeout", "Maximum interval between WAL commits (in ms.)", Integer.class, 250),
 
   WAL_SHUTDOWN_TIMEOUT("storage.wal.shutdownTimeout", "Maximum wait interval between events, when the background flush thread"
       + "receives a shutdown command and when the background flush will be stopped (in ms.)", Integer.class, 10000),
