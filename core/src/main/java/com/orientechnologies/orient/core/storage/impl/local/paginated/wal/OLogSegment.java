@@ -204,10 +204,12 @@ final class OLogSegment implements Comparable<OLogSegment> {
       } else {
         int index = (int) (curPageIndex - startPageIndex);
 
-        assert index == pagesToFlush.size() - 1;
-
-        buffer = pagesToFlush.get(index);
-        fetchedFromList = true;
+        if (index < pagesToFlush.size()) {
+          buffer = pagesToFlush.get(index);
+          fetchedFromList = true;
+        } else {
+          buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+        }
       }
 
       OLogSequenceNumber lsn = null;
