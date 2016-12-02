@@ -1087,7 +1087,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         }
       }
 
-
       long totalFlushTime = (lsnFlushTime + exclusivePagesFlushTime);
       if (totalFlushTime > 0) {
         System.out.println("Distribution of flushes");
@@ -1859,6 +1858,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       if (!pageIterator.hasNext())
         break;
 
+      long firstPageIndex = -1;
+      long firstFileId = -1;
+
       try {
         while (chunk.size() < CHUNK_SIZE && (endTs - startTs < backgroundFlushInterval)) {
           //if we reached first part of the ring, swap iterator to next part of the ring
@@ -1866,11 +1868,24 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
             flushedPages += flushPagesChunk(chunk);
             releaseExclusiveLatch();
 
-            continue flushCycle;
+            if (lastFileId != firstFileId || lastPageIndex == -1 || (lastPageIndex - firstPageIndex) > 256)
+              continue flushCycle;
+            else {
+              endTs = System.nanoTime();
+              pageIterator = writeCachePages.entrySet().iterator();
+
+              if (!pageIterator.hasNext())
+                break;
+            }
           }
 
           final Map.Entry<PageKey, OCachePointer> cacheEntry = pageIterator.next();
           final PageKey pageKey = cacheEntry.getKey();
+
+          if (firstFileId == -1) {
+            firstFileId = pageKey.fileId;
+            firstPageIndex = pageKey.pageIndex;
+          }
 
           final long version;
 
@@ -1904,7 +1919,13 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
               flushedPages += flushPagesChunk(chunk);
               releaseExclusiveLatch();
 
-              continue flushCycle;
+              if (pageKey.fileId != firstFileId || (pageKey.pageIndex - firstPageIndex) > 256)
+                continue flushCycle;
+              else {
+                endTs = System.nanoTime();
+
+                chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
+              }
             } else {
               chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
             }
