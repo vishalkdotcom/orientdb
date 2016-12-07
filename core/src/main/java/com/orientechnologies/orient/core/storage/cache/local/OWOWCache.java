@@ -54,6 +54,7 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSe
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OPerformanceStatisticManager;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionStoragePerformanceStatistic;
+import org.HdrHistogram.Histogram;
 
 import java.io.EOFException;
 import java.io.File;
@@ -1660,8 +1661,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         if (writeCachePages.isEmpty()) {
           return;
         }
-
-        final long startTs = System.nanoTime();
 
         // cache is split on two types of buffers
         //
