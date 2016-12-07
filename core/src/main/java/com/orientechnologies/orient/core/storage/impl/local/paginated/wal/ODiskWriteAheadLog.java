@@ -569,13 +569,15 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
 
   @Override
   public long activeSegment() {
+    final OLogSegment last;
     syncObject.lock();
     try {
-      final OLogSegment last = logSegments.get(logSegments.size() - 1);
-      return last.getOrder();
+      last = logSegments.get(logSegments.size() - 1);
     } finally {
       syncObject.unlock();
     }
+
+    return last.getOrder();
   }
 
   @Override

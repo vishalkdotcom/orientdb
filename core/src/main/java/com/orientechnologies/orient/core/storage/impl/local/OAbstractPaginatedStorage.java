@@ -163,7 +163,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
 
   protected volatile ScheduledExecutorService fuzzyCheckpointExecutor;
 
-  private final Histogram walSizeWhenVacuumStartsHistogram = new Histogram(536870912, 274877906944L, 3);
+  private final Histogram walSizeWhenVacuumStartsHistogram = new Histogram( 3);
 
   public OAbstractPaginatedStorage(String name, String filePath, String mode, int id) {
     super(name, filePath, mode, OGlobalConfiguration.STORAGE_LOCK_TIMEOUT.getValueAsInteger());
@@ -186,7 +186,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   }
 
   public void open(final String iUserName, final String iUserPassword, final Map<String, Object> iProperties) {
-    OLogManager.instance().error(this, "YCSB freeze version 11");
+    OLogManager.instance().error(this, "YCSB freeze version 12");
 
     stateLock.acquireReadLock();
     try {
@@ -340,7 +340,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   }
 
   public void create(final Map<String, Object> iProperties) {
-    OLogManager.instance().error(this, "YCSB freeze version 11");
+    OLogManager.instance().error(this, "YCSB freeze version 12");
 
     stateLock.acquireWriteLock();
     try {
