@@ -175,8 +175,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
             "Location passed in WAL does not exist, or IO error was happened. DB cannot work in durable mode in such case");
 
       if (walFiles.length == 0) {
-        OLogSegment logSegment = new OLogSegment(this, new File(this.walLocation, getSegmentName(0)), fileTTL, maxPagesCacheSize,
-            performanceStatisticManager);
+        OLogSegment logSegment = new OLogSegment(this, new File(this.walLocation, getSegmentName(0)), fileTTL, maxPagesCacheSize);
         logSegment.init();
         logSegment.startFlush();
         logSegments.add(logSegment);
@@ -189,7 +188,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
         logSize = 0;
 
         for (File walFile : walFiles) {
-          OLogSegment logSegment = new OLogSegment(this, walFile, fileTTL, maxPagesCacheSize, performanceStatisticManager);
+          OLogSegment logSegment = new OLogSegment(this, walFile, fileTTL, maxPagesCacheSize);
           logSegment.init();
 
           logSegments.add(logSegment);
@@ -482,8 +481,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
             && activeOperations.isEmpty())) {
           last.stopFlush(true);
 
-          last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize,
-              performanceStatisticManager);
+          last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize);
           last.init();
           last.startFlush();
 
@@ -534,8 +532,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
         logSegments.remove(logSegments.size() - 1);
       }
 
-      last = new OLogSegment(this, new File(walLocation, getSegmentName(lsn.getSegment() + 1)), fileTTL, maxPagesCacheSize,
-          performanceStatisticManager);
+      last = new OLogSegment(this, new File(walLocation, getSegmentName(lsn.getSegment() + 1)), fileTTL, maxPagesCacheSize);
       last.init();
       last.startFlush();
 
@@ -560,8 +557,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
 
       last.stopFlush(true);
 
-      last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize,
-          performanceStatisticManager);
+      last = new OLogSegment(this, new File(walLocation, getSegmentName(last.getOrder() + 1)), fileTTL, maxPagesCacheSize);
       last.init();
       last.startFlush();
 

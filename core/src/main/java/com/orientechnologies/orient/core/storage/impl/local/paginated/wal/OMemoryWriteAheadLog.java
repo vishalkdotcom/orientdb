@@ -159,4 +159,9 @@ public class OMemoryWriteAheadLog extends OAbstractWriteAheadLog {
   @Override
   public void removeLowDiskSpaceListener(OLowDiskSpaceListener listener) {
   }
+
+  @Override
+  public long size() {
+    return 0;
+  }
 }

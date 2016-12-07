@@ -46,7 +46,6 @@ public class OCachePointer {
   private final ByteBuffer      buffer;
   private final OByteBufferPool bufferPool;
 
-  private volatile boolean inWriteCache;
   private volatile boolean notFlushed;
 
   private final ThreadLocal<ByteBuffer> threadLocalBuffer = new ThreadLocal<ByteBuffer>() {
@@ -82,14 +81,6 @@ public class OCachePointer {
 
   public void setNotFlushed(boolean notFlushed) {
     this.notFlushed = notFlushed;
-  }
-
-  public boolean isInWriteCache() {
-    return inWriteCache;
-  }
-
-  public void setInWriteCache(boolean inWriteCache) {
-    this.inWriteCache = inWriteCache;
   }
 
   public void setWritersListener(WritersListener writersListener) {

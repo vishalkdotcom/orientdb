@@ -10,6 +10,7 @@ import java.util.zip.CRC32;
 import com.orientechnologies.common.collection.closabledictionary.OClosableLinkedContainer;
 import com.orientechnologies.common.directmemory.OByteBufferPool;
 import com.orientechnologies.orient.core.storage.cache.local.OWOWCache;
+import org.junit.Ignore;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -1068,6 +1069,7 @@ public class ReadWriteDiskCacheTest {
     Assert.assertEquals("readWriteDiskCacheTest.tst", pageErrors[1].fileName);
   }
 
+  @Test(enabled = false)
   public void testFlushTillLSN() throws Exception {
     closeBufferAndDeleteFile();
 

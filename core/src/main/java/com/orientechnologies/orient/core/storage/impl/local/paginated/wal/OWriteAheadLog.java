@@ -116,4 +116,6 @@ public interface OWriteAheadLog {
 
   void removeLowDiskSpaceListener(OLowDiskSpaceListener listener);
 
+  long size();
+
 }
