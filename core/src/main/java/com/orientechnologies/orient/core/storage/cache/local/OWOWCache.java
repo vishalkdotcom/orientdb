@@ -1767,7 +1767,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
                 walBasedFlushDuration.recordValue(end - start);
                 if (lastNormalFlushEndTs >= 0) {
-                  normalFlushInterval.recordValue((lastNormalFlushEndTs - start));
+                  normalFlushInterval.recordValue((start - lastNormalFlushEndTs));
                 }
 
                 activeSegment = writeAheadLog.activeSegment();
