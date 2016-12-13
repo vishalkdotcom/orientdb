@@ -180,8 +180,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private PageKey lastFlushedKey = null;
 
-  private final AtomicInteger flushSegmentRequests = new AtomicInteger();
-
   /**
    * Listeners which are called when exception in background data flush thread is happened.
    */
@@ -589,16 +587,11 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   @Override
   public void flushTillSegment(long segmentId) {
-    flushSegmentRequests.getAndIncrement();
+    Future<Void> future = commitExecutor.submit(new FlushTillSegmentTask(segmentId));
     try {
-      Future<Void> future = commitExecutor.submit(new FlushTillSegmentTask(segmentId));
-      try {
-        future.get();
-      } catch (Exception e) {
-        throw ODatabaseException.wrapException(new OStorageException("Error during data flush"), e);
-      }
-    } finally {
-      flushSegmentRequests.getAndDecrement();
+      future.get();
+    } catch (Exception e) {
+      throw ODatabaseException.wrapException(new OStorageException("Error during data flush"), e);
     }
   }
 
@@ -1109,8 +1102,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       if (flushTotal > 0) {
         System.out.println("Flush/idle distribution:");
 
-        for (long count : flushIdlePercentsCount) {
-          System.out.println((100 * count) / flushTotal);
+        for (int i = 0; i < flushIdlePercentsCount.length; i++) {
+          long count = flushIdlePercentsCount[i];
+          System.out.println(i + " - " + ((100 * count) / flushTotal) + "%");
         }
       }
 
@@ -2161,7 +2155,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     double exclusiveWriteCacheThreshold = ((double) ewcs) / exclusiveWriteCacheMaxSize;
 
     double flushThreshold = exclusiveWriteCacheThreshold - 0.7;
-    boolean continousMode = flushThreshold >= 0.15;
 
     long pagesToFlush = Math.max((long) Math.ceil(flushThreshold * exclusiveWriteCacheMaxSize), 1);
 
@@ -2179,14 +2172,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
           releaseExclusiveLatch();
 
           iterator = exclusiveWritePages.iterator();
-
-          if (continousMode) {
-            if (flushSegmentRequests.get() == 0) {
-              pagesToFlush = updatePagesToFlush(pagesToFlush);
-            } else {
-              continousMode = false;
-            }
-          }
         }
 
         if (!iterator.hasNext()) {
@@ -2229,14 +2214,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
               flushedPages += flushPagesChunk(chunk);
               releaseExclusiveLatch();
 
-              if (continousMode) {
-                if (flushSegmentRequests.get() == 0) {
-                  pagesToFlush = updatePagesToFlush(pagesToFlush);
-                } else {
-                  continousMode = false;
-                }
-              }
-
               chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
             } else {
               chunk.add(new OTriple<Long, ByteBuffer, OCachePointer>(version, copy, pointer));
@@ -2250,14 +2227,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       flushedPages += flushPagesChunk(chunk);
       releaseExclusiveLatch();
-
-      if (continousMode) {
-        if (flushSegmentRequests.get() == 0) {
-          pagesToFlush = updatePagesToFlush(pagesToFlush);
-        } else {
-          continousMode = false;
-        }
-      }
     }
 
     releaseExclusiveLatch();
