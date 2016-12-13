@@ -133,8 +133,6 @@ final class OLogSegment implements Comparable<OLogSegment> {
   private boolean    lastPageIsFull       = false;
 
   private long lastFSyncTime = -1;
-  private long fsyncInterval = writeAheadLog.getCommitDelay() * 1000000L;
-
   private long             startPageIndex = -1;
   private List<ByteBuffer> pagesToFlush   = new ArrayList<ByteBuffer>();
 
@@ -146,6 +144,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
   //end of properties shared between FlushTasks
 
   private final class FlushTask implements Runnable {
+    private final long fsyncInterval = writeAheadLog.getCommitDelay() * 1000000L;
     private final boolean forceFSync;
 
     private FlushTask(boolean forceFSync) {
