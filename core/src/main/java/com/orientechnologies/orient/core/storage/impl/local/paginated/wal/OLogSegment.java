@@ -127,21 +127,26 @@ final class OLogSegment implements Comparable<OLogSegment> {
   private WeakReference<OPair<OLogSequenceNumber, byte[]>> lastReadRecord = new WeakReference<OPair<OLogSequenceNumber, byte[]>>(
       null);
 
+  //start of properties shared between FlushTasks which are ran using the SAME thread
+  private ByteBuffer lastWrittenPage      = null;
+  private long       lastWrittenPageIndex = -1;
+  private boolean    lastPageIsFull       = false;
+
+  private long lastFSyncTime = -1;
+  private long fsyncInterval = writeAheadLog.getCommitDelay() * 1000000L;
+
+  private long             startPageIndex = -1;
+  private List<ByteBuffer> pagesToFlush   = new ArrayList<ByteBuffer>();
+
+  private OLogSequenceNumber lastSerializedLSN = null;
+
+  private boolean pendingFSync = false;
+
+  private long serializedUpTo = 0;
+  //end of properties shared between FlushTasks
+
   private final class FlushTask implements Runnable {
-
-    private long lastFSyncTime = -1;
-    private long fsyncInterval = writeAheadLog.getCommitDelay() * 1000000L;
-
-    private long             startPageIndex = -1;
-    private List<ByteBuffer> pagesToFlush   = new ArrayList<ByteBuffer>();
-
-    private OLogSequenceNumber lastSerializedLSN = null;
-
-    private boolean pendingFSync = false;
-
     private final boolean forceFSync;
-
-    private long serializedUpTo = 0;
 
     private FlushTask(boolean forceFSync) {
       this.forceFSync = forceFSync;
@@ -192,18 +197,26 @@ final class OLogSegment implements Comparable<OLogSegment> {
       if (pagesToFlush.isEmpty()) {
         startPageIndex = curPageIndex;
 
-        fileLock.lock();
-        try {
-          buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
-          final RandomAccessFile rndFile = getRndFile();
+        if (lastWrittenPage == null) {
+          fileLock.lock();
+          try {
+            buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+            final RandomAccessFile rndFile = getRndFile();
 
-          long pagesCount = rndFile.length() / OWALPage.PAGE_SIZE;
-          if (pagesCount > curPageIndex) {
-            FileChannel channel = rndFile.getChannel();
-            channel.read(buffer, curPageIndex * OWALPage.PAGE_SIZE);
+            long pagesCount = rndFile.length() / OWALPage.PAGE_SIZE;
+            if (pagesCount > curPageIndex) {
+              FileChannel channel = rndFile.getChannel();
+              channel.read(buffer, curPageIndex * OWALPage.PAGE_SIZE);
+            }
+          } finally {
+            fileLock.unlock();
           }
-        } finally {
-          fileLock.unlock();
+        } else {
+          if (lastWrittenPageIndex == curPageIndex) {
+            buffer = lastWrittenPage;
+          } else {
+            buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+          }
         }
       } else {
         int index = (int) (curPageIndex - startPageIndex);
@@ -234,15 +247,19 @@ final class OLogSegment implements Comparable<OLogSegment> {
           int fromRecord = written;
           written += contentLength;
 
+          lastPageIsFull = false;
           pos = writeContentInPage(buffer, pos, log.record, written == log.record.length, fromRecord, contentLength);
+
           if (OWALPage.PAGE_SIZE - pos < OWALPage.MIN_RECORD_SIZE) {
             preparePageForFlush(buffer);
 
             if (!fetchedFromList) {
               pagesToFlush.add(buffer);
             }
+            lastPageIsFull = true;
 
             buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+
             lastToFlush = false;
             fetchedFromList = false;
 
@@ -305,7 +322,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
     private void flushAndSyncPages(boolean forceFSync) throws IOException {
       final long fsyncTs = System.nanoTime();
 
-      boolean pending = pagesToFlush.size() * OWALPage.PAGE_SIZE >= 8 * 1024 * 1024;
+      boolean pending = pagesToFlush.size() * OWALPage.PAGE_SIZE >= (8 * 1024 * 1024 + OWALPage.PAGE_SIZE);
       boolean fsync =
           forceFSync || ((pendingFSync || pending) && ((fsyncTs - lastFSyncTime) >= fsyncInterval || lastFSyncTime == -1));
 
@@ -316,15 +333,35 @@ final class OLogSegment implements Comparable<OLogSegment> {
           final FileChannel channel = rndFile.getChannel();
 
           if (!pagesToFlush.isEmpty()) {
+            final ByteBuffer[] buffers = pagesToFlush.toArray(new ByteBuffer[0]);
+            pagesToFlush.clear();
 
-            for (ByteBuffer buffer : pagesToFlush) {
+            for (ByteBuffer buffer : buffers) {
               buffer.position(0);
             }
 
             channel.position(startPageIndex * OWALPage.PAGE_SIZE);
-            channel.write(pagesToFlush.toArray(new ByteBuffer[0]));
 
-            pagesToFlush.clear();
+            if (lastPageIsFull) {
+              channel.write(buffers);
+
+              lastWrittenPage = null;
+              lastWrittenPageIndex = -1;
+              lastPageIsFull = false;
+            } else {
+              lastWrittenPage = buffers[buffers.length - 1];
+              lastWrittenPageIndex = startPageIndex + buffers.length;
+
+              if (!fsync) {
+                if (buffers.length > 1) {
+                  final ByteBuffer[] data = new ByteBuffer[buffers.length - 1];
+                  System.arraycopy(buffers, 0, data, 0, buffers.length - 1);
+                  channel.write(data);
+                }
+              } else {
+                channel.write(buffers);
+              }
+            }
 
             writtenUpTo = serializedUpTo;
             startPageIndex = -1;
@@ -332,7 +369,6 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
             writeAheadLog.checkFreeSpace();
           }
-
 
           if (fsync) {
             assert pagesToFlush.isEmpty();
@@ -577,11 +613,19 @@ final class OLogSegment implements Comparable<OLogSegment> {
     long pagesInCache = (filledUpTo - writtenUpTo) / OWALPage.PAGE_SIZE;
     if (pagesInCache > maxPagesCacheSize) {
       OLogManager.instance()
-          .info(this, "Max cache limit is reached (%d vs. %d), sync flush is performed", maxPagesCacheSize, pagesInCache);
+          .info(this, "Max cache limit is reached (%d vs. %d), sync write is performed", maxPagesCacheSize, pagesInCache);
 
       writeAheadLog.incrementCacheOverflowCount();
 
-      flush();
+      try {
+        commitExecutor.submit(new FlushTask(false)).get();
+      } catch (InterruptedException e) {
+        Thread.interrupted();
+        throw OException.wrapException(new OStorageException("Thread was interrupted during WAL write"), e);
+      } catch (ExecutionException e) {
+        throw OException.wrapException(new OStorageException("Error during WAL segment '" + getPath() + "' write"), e);
+      }
+
     }
     return last;
   }
