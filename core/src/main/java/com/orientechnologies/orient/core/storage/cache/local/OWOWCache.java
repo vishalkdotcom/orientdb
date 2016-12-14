@@ -54,11 +54,15 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSe
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OPerformanceStatisticManager;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionStoragePerformanceStatistic;
+import net.jpountz.lz4.LZ4Compressor;
+import net.jpountz.lz4.LZ4Factory;
 import org.HdrHistogram.Histogram;
 
 import java.io.*;
 import java.lang.ref.WeakReference;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -167,9 +171,19 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private final OByteBufferPool bufferPool;
 
+  private final Histogram fsyncHistogram   = new Histogram(3);
+  private final Histogram lzSpeedHistogram = new Histogram(3);
+
+  private final LZ4Compressor compressor;
+
   private FLUSH_MODE flushMode = FLUSH_MODE.IDLE;
 
   private PageKey lastFlushedKey = null;
+
+  private long compressionCounts = 0;
+  private long compressionBefore = 0;
+  private long compressionAfter  = 0;
+
 
   /**
    * Listeners which are called when exception in background data flush thread is happened.
@@ -202,6 +216,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       final OBinarySerializerFactory binarySerializerFactory = storageLocal.getComponentsFactory().binarySerializerFactory;
       this.stringSerializer = binarySerializerFactory.getObjectSerializer(OType.STRING);
+
+      LZ4Factory factory = LZ4Factory.fastestInstance();
+      compressor = factory.fastCompressor();
 
       commitExecutor = Executors.newSingleThreadScheduledExecutor(new FlushThreadFactory(storageLocal.getName()));
       lowSpaceEventsPublisher = Executors.newCachedThreadPool(new LowSpaceEventsPublisherFactory(storageLocal.getName()));
@@ -1060,6 +1077,26 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         counter++;
       }
 
+      if (compressionCounts > 0) {
+        System.out.println("Compression ratio " + ((compressionBefore * 1.0) / compressionAfter));
+      }
+
+      File fsyncLog = new File("fsync.hdrp");
+      if (fsyncLog.exists())
+        fsyncLog.delete();
+
+      PrintStream fsyncStream = new PrintStream(fsyncLog);
+      fsyncHistogram.outputPercentileDistribution(fsyncStream, 1000.0);
+      fsyncStream.close();
+
+      File lz4Log = new File("lz4.hdrp");
+      if (lz4Log.exists())
+        lz4Log.delete();
+
+      PrintStream lz4Stream = new PrintStream(lz4Log);
+      lzSpeedHistogram.outputPercentileDistribution(lz4Stream, 1000.0);
+      lz4Stream.close();
+
       return ds;
     } finally {
       filesLock.releaseWriteLock();
@@ -1618,6 +1655,10 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     @Override
     public Void call() throws Exception {
+      if (flushMode.equals(FLUSH_MODE.IDLE)) {
+        makeFilesFSync();
+      }
+
       try {
         convertSharedDirtyPagesToLocal();
         Map.Entry<OLogSequenceNumber, Set<PageKey>> firstEntry = localDirtyPagesByLSN.firstEntry();
@@ -1658,9 +1699,24 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   private final class PeriodicFlushTask implements Runnable {
+    private long lastFsyncTs = -1;
 
     @Override
     public void run() {
+      long now = System.nanoTime();
+
+      if (lastFsyncTs == -1) {
+        lastFsyncTs = now;
+      } else if (TimeUnit.SECONDS.convert(now - lastFsyncTs, TimeUnit.NANOSECONDS) > 10){
+        try {
+          makeFilesFSync();
+
+          lastFsyncTs = now;
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+
       final OSessionStoragePerformanceStatistic statistic = performanceStatisticManager.getSessionPerformanceStatistic();
       if (statistic != null)
         statistic.startWriteCacheFlushTimer();
@@ -1743,7 +1799,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       assert ewcs >= 0;
       double exclusiveWriteCacheThreshold = ((double) ewcs) / exclusiveWriteCacheMaxSize;
 
-      if (exclusiveWriteCacheThreshold > 0.85) {
+      if (exclusiveWriteCacheThreshold > 0.7) {
         if (!flushMode.equals(FLUSH_MODE.EXCLUSIVE)) {
           flushMode = FLUSH_MODE.EXCLUSIVE;
 
@@ -1771,6 +1827,26 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       return flushedPages;
     }
+  }
+
+  private void makeFilesFSync() throws IOException {
+    long start = System.nanoTime();
+
+    for (int intId : nameIdMap.values()) {
+      final long extId = composeFileId(id, intId);
+
+      final OClosableEntry<Long, OFileClassic> entry = files.acquire(extId);
+      try {
+        final OFileClassic fileClassic = entry.get();
+        fileClassic.synch();
+      } finally {
+        files.release(entry);
+      }
+    }
+
+    long end = System.nanoTime();
+
+    fsyncHistogram.recordValue(end - start);
   }
 
   public final class FindMinDirtyLSN implements Callable<OLogSequenceNumber> {
@@ -1955,7 +2031,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     final long ewcs = exclusiveWriteCacheSize.get();
     double exclusiveWriteCacheThreshold = ((double) ewcs) / exclusiveWriteCacheMaxSize;
 
-    if (exclusiveWriteCacheThreshold <= 0.7) {
+    if (exclusiveWriteCacheThreshold <= 0.9) {
       final CountDownLatch latch = exclusivePagesLatch.get();
       if (latch != null)
         latch.countDown();
@@ -1971,6 +2047,18 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     ByteBuffer[] buffers = new ByteBuffer[chunk.size()];
     for (int i = 0; i < buffers.length; i++) {
       final ByteBuffer buffer = chunk.get(i).getValue().getKey();
+
+      long start = System.nanoTime();
+      buffer.position(0);
+      compressionBefore += buffer.limit();
+      ByteBuffer compressed = ByteBuffer.allocate(compressor.maxCompressedLength(buffer.limit())).order(ByteOrder.nativeOrder());
+      compressionAfter += compressor.compress(buffer, 0, buffer.limit(), compressed, 0, compressed.limit());
+      compressionCounts++;
+      long end = System.nanoTime();
+
+      lzSpeedHistogram.recordValue(end - start);
+
+      buffer.position(0);
       buffers[i] = buffer;
     }
 
