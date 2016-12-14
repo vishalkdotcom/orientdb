@@ -321,7 +321,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
     private void flushAndSyncPages(boolean forceFSync) throws IOException {
       final long fsyncTs = System.nanoTime();
 
-      boolean pending = pagesToFlush.size() * OWALPage.PAGE_SIZE >= (8 * 1024 * 1024 + OWALPage.PAGE_SIZE);
+      boolean pending = pagesToFlush.size() * OWALPage.PAGE_SIZE >= (4 * 1024 * 1024 + OWALPage.PAGE_SIZE);
       boolean fsync =
           forceFSync || ((pendingFSync || pending) && ((fsyncTs - lastFSyncTime) >= fsyncInterval || lastFSyncTime == -1));
 
