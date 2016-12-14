@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public class OWALPage {
   public static final long MAGIC_NUMBER    = 0xFACB03FEL;
-  public static final int  PAGE_SIZE       = OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * 1024;
+  public static final int  PAGE_SIZE       =  64 * 1024;
   public static final int  MIN_RECORD_SIZE = OIntegerSerializer.INT_SIZE + 3;
 
   public static final  int CRC_OFFSET          = 0;
