@@ -163,8 +163,6 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
 
   protected volatile ScheduledExecutorService fuzzyCheckpointExecutor;
 
-  private final Histogram walSizeWhenVacuumStartsHistogram = new Histogram( 3);
-
   public OAbstractPaginatedStorage(String name, String filePath, String mode, int id) {
     super(name, filePath, mode, OGlobalConfiguration.STORAGE_LOCK_TIMEOUT.getValueAsInteger());
 
@@ -2612,7 +2610,7 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   @Override
   public void requestCheckpoint() {
     if (!walVacuumInProgress.get() && walVacuumInProgress.compareAndSet(false, true)) {
-      fuzzyCheckpointExecutor.submit(new WALVacuum(walSizeWhenVacuumStartsHistogram));
+      fuzzyCheckpointExecutor.submit(new WALVacuum());
     }
   }
 
@@ -3620,18 +3618,6 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
         throw OException.wrapException(new OInterruptedException("Thread was interrupted during fuzzy checkpoint termination"), e);
       }
     }
-
-    File walVacuumHistogramLog = new File("WALVacuumSize.hdrp");
-    if (walVacuumHistogramLog.exists())
-      walVacuumHistogramLog.delete();
-
-    try {
-      PrintStream walVacuumReport = new PrintStream(walVacuumHistogramLog);
-      walSizeWhenVacuumStartsHistogram.outputPercentileDistribution(walVacuumReport, 1024 * 1024 * 1024.0);
-      walVacuumReport.close();
-    } catch (FileNotFoundException e) {
-      e.printStackTrace();
-    }
   }
 
   protected void closeClusters(boolean onDelete) throws IOException {
@@ -4437,10 +4423,8 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
   }
 
   private final class WALVacuum implements Runnable {
-    private final Histogram histogram;
 
-    public WALVacuum(Histogram histogram) {
-      this.histogram = histogram;
+    public WALVacuum() {
     }
 
     @Override
@@ -4460,8 +4444,6 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
         } else {
           flushTillSegmentId = (nonActiveSegments[0] + nonActiveSegments[nonActiveSegments.length - 1]) / 2;
         }
-
-        histogram.recordValue(((ODiskWriteAheadLog) writeAheadLog).size());
 
         long minDirtySegment;
         do {
