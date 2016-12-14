@@ -1822,7 +1822,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
           }
 
           flushMode = FLUSH_MODE.EXCLUSIVE;
-          System.out.println("Exclusive mode started");
 
           flushedPages += flushExclusiveWriteCache();
 
@@ -1831,7 +1830,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
           if (exclusiveWriteCacheThreshold <= 0.7) {
             flushMode = FLUSH_MODE.IDLE;
-            System.out.println("Exclusive mode stopped");
             flushEndTime = System.nanoTime();
           }
         } else {
@@ -1842,7 +1840,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
           if (exclusiveWriteCacheThreshold <= 0.7) {
             flushMode = FLUSH_MODE.IDLE;
-            System.out.println("Exclusive mode stopped");
             flushEndTime = System.nanoTime();
           }
         }
