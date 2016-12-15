@@ -54,13 +54,10 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSe
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OPerformanceStatisticManager;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionStoragePerformanceStatistic;
-import org.HdrHistogram.Histogram;
 
 import java.io.*;
 import java.lang.ref.WeakReference;
-import java.nio.Buffer;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -169,15 +166,19 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private final OByteBufferPool bufferPool;
 
-  private final Histogram fsyncHistogram = new Histogram(3);
-
   private FLUSH_MODE flushMode = FLUSH_MODE.IDLE;
 
   private PageKey lastFlushedKey = null;
 
-  private long lastFsyncTs = -1;
+  private long flushedPages = 0;
+  private long startFlushTs = -1;
 
-  private final Histogram[] chunkTimes = new Histogram[CHUNK_SIZE];
+  private AtomicLong fuzzyCheckpointPrevTs      = new AtomicLong(-1);
+  private AtomicLong fuzzyCheckpointCount       = new AtomicLong(0);
+
+  private AtomicLong minFuzzyCheckpointInterval = new AtomicLong(Long.MAX_VALUE);
+  private AtomicLong maxFuzzyCheckpointInterval = new AtomicLong(-1);
+  private AtomicLong fuzzyCheckpointSum         = new AtomicLong(0);
 
   /**
    * Listeners which are called when exception in background data flush thread is happened.
@@ -196,10 +197,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       this.pageSize = pageSize;
       this.writeAheadLog = writeAheadLog;
       this.bufferPool = bufferPool;
-
-      for (int i = 0; i < chunkTimes.length; i++) {
-        chunkTimes[i] = new Histogram(3);
-      }
 
       int writeNormalizedSize = normalizeMemory(exclusiveWriteCacheMaxSize, pageSize);
       if (checkMinSize && writeNormalizedSize < MIN_CACHE_SIZE)
@@ -595,6 +592,38 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   public void makeFuzzyCheckpoint(long segmentId) throws IOException {
+    while (true) {
+      long now = System.nanoTime();
+      long prev = fuzzyCheckpointPrevTs.get();
+
+      if (prev == -1) {
+        if (fuzzyCheckpointPrevTs.compareAndSet(-1, now)) {
+          break;
+        } else {
+          continue;
+        }
+      } else {
+        long duration = now - prev;
+        long min = minFuzzyCheckpointInterval.get();
+        long max = maxFuzzyCheckpointInterval.get();
+
+        if (duration < min) {
+          if (!minFuzzyCheckpointInterval.compareAndSet(min, duration)) {
+            continue;
+          }
+        }
+
+        if (duration > max) {
+          if(!maxFuzzyCheckpointInterval.compareAndSet(max, duration))
+            continue;
+        }
+
+        fuzzyCheckpointCount.incrementAndGet();
+        fuzzyCheckpointSum.addAndGet(duration);
+        break;
+      }
+    }
+
     if (writeAheadLog != null) {
       filesLock.acquireReadLock();
       try {
@@ -1022,6 +1051,22 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   public long[] close() throws IOException {
     flush();
 
+    if (flushedPages > 0) {
+      final long now = System.nanoTime();
+      final long durationInMs = (now - startFlushTs) / 1000000L;
+
+      System.out.println("Write speed " + (flushedPages / durationInMs) + " per ms.");
+    }
+
+    if (fuzzyCheckpointCount.get() == 0) {
+      System.out.println("No fuzzy checkpoints");
+    } else {
+      System.out.println("Checkpoint min interval " + minFuzzyCheckpointInterval.get());
+      System.out.println("Checkpoint max interval " + minFuzzyCheckpointInterval.get());
+
+      System.out.println("Checkpoint avg interval " + (fuzzyCheckpointSum.get() / fuzzyCheckpointCount.get()));
+    }
+
     if (!commitExecutor.isShutdown()) {
       commitExecutor.shutdown();
       try {
@@ -1070,26 +1115,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       for (long id : result) {
         ds[counter] = id;
         counter++;
-      }
-
-      File fsyncLog = new File("fsync.hdrp");
-      if (fsyncLog.exists())
-        fsyncLog.delete();
-
-      PrintStream fsyncStream = new PrintStream(fsyncLog);
-      fsyncHistogram.outputPercentileDistribution(fsyncStream, 1000.0);
-      fsyncStream.close();
-
-      for (int i = 0; i < CHUNK_SIZE; i++) {
-        File chunkTime = new File("chunkTime" + (i + 1) + ".hdrp");
-        if (chunkTime.exists())
-          chunkTime.delete();
-
-        if (chunkTimes[i].getTotalCount() != 0) {
-          PrintStream chunkTimeStream = new PrintStream(chunkTime);
-          chunkTimes[i].outputPercentileDistribution(chunkTimeStream, 1000.0);
-          chunkTimeStream.close();
-        }
       }
 
       return ds;
@@ -1650,9 +1675,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     @Override
     public Void call() throws Exception {
-      if (flushMode.equals(FLUSH_MODE.IDLE)) {
-        makeFilesFSync();
-      }
+      long flushedPages = 0;
 
       try {
         convertSharedDirtyPagesToLocal();
@@ -1663,9 +1686,9 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
         OLogSequenceNumber minDirtyLSN = firstEntry.getKey();
         while (minDirtyLSN.getSegment() < segmentId) {
-          flushExclusivePagesIfNeeded();
+          flushedPages += flushExclusivePagesIfNeeded();
 
-          flushWriteCacheFromMinLSN();
+          flushedPages += flushWriteCacheFromMinLSN();
 
           firstEntry = localDirtyPagesByLSN.firstEntry();
 
@@ -1675,21 +1698,24 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
         return null;
       } finally {
+        OWOWCache.this.flushedPages += flushedPages;
         flushMode = FLUSH_MODE.IDLE;
       }
     }
 
-    private void flushExclusivePagesIfNeeded() throws IOException {
+    private long flushExclusivePagesIfNeeded() throws IOException {
       long ewcs = exclusiveWriteCacheSize.get();
 
       assert ewcs >= 0;
       double exclusiveWriteCacheThreshold = ((double) ewcs) / exclusiveWriteCacheMaxSize;
 
       if (exclusiveWriteCacheThreshold > 0.7) {
-        flushExclusiveWriteCache();
+        return flushExclusiveWriteCache();
       } else {
         releaseExclusiveLatch();
       }
+
+      return 0;
     }
   }
 
@@ -1697,8 +1723,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     @Override
     public void run() {
-      scheduleFilesFSync();
-
       final OSessionStoragePerformanceStatistic statistic = performanceStatisticManager.getSessionPerformanceStatistic();
       if (statistic != null)
         statistic.startWriteCacheFlushTimer();
@@ -1707,6 +1731,10 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       try {
         if (writeCachePages.isEmpty()) {
           return;
+        }
+
+        if (startFlushTs == -1) {
+          startFlushTs = System.nanoTime();
         }
 
         // cache is split on two types of buffers
@@ -1756,7 +1784,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
               }
             }
           } else {
-            flushWriteCacheFromMinLSN();
+            flushedPages += flushWriteCacheFromMinLSN();
           }
         }
 
@@ -1770,6 +1798,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         OLogManager.instance().error(this, "Exception during data flush", t);
         t.printStackTrace();
       } finally {
+        OWOWCache.this.flushedPages += flushedPages;
+
         if (statistic != null)
           statistic.stopWriteCacheFlushTimer(flushedPages);
       }
@@ -1809,42 +1839,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       return flushedPages;
     }
-  }
-
-  private void scheduleFilesFSync() {
-    long now = System.nanoTime();
-
-    if (lastFsyncTs == -1) {
-      lastFsyncTs = now;
-    } else if (TimeUnit.SECONDS.convert(now - lastFsyncTs, TimeUnit.NANOSECONDS) > 10) {
-      try {
-        makeFilesFSync();
-
-        lastFsyncTs = now;
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-    }
-  }
-
-  private void makeFilesFSync() throws IOException {
-    long start = System.nanoTime();
-
-    for (int intId : nameIdMap.values()) {
-      final long extId = composeFileId(id, intId);
-
-      final OClosableEntry<Long, OFileClassic> entry = files.acquire(extId);
-      try {
-        final OFileClassic fileClassic = entry.get();
-        fileClassic.synch();
-      } finally {
-        files.release(entry);
-      }
-    }
-
-    long end = System.nanoTime();
-
-    fsyncHistogram.recordValue(end - start);
   }
 
   public final class FindMinDirtyLSN implements Callable<OLogSequenceNumber> {
@@ -2059,11 +2053,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     OClosableEntry<Long, OFileClassic> fileEntry = files.acquire(firstFileId);
     try {
       OFileClassic file = fileEntry.get();
-      final long startTime = System.nanoTime();
       file.write(firstPageIndex * pageSize, buffers);
-      final long endTime = System.nanoTime();
-
-      chunkTimes[buffers.length - 1].recordValue(endTime - startTime);
     } catch (IOException e) {
       final File storageDir = new File(storagePath);
 
@@ -2121,8 +2111,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     final int flushedPages = chunk.size();
     chunk.clear();
-
-    scheduleFilesFSync();
 
     return flushedPages;
   }
