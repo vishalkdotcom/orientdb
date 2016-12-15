@@ -172,18 +172,16 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   private final OByteBufferPool bufferPool;
 
   private final Histogram fsyncHistogram   = new Histogram(3);
-  private final Histogram lzSpeedHistogram = new Histogram(3);
-
-  private final LZ4Compressor compressor;
 
   private FLUSH_MODE flushMode = FLUSH_MODE.IDLE;
 
   private PageKey lastFlushedKey = null;
 
+  private long lastFsyncTs = -1;
+
   private long compressionCounts = 0;
   private long compressionBefore = 0;
   private long compressionAfter  = 0;
-
 
   /**
    * Listeners which are called when exception in background data flush thread is happened.
@@ -216,9 +214,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
       final OBinarySerializerFactory binarySerializerFactory = storageLocal.getComponentsFactory().binarySerializerFactory;
       this.stringSerializer = binarySerializerFactory.getObjectSerializer(OType.STRING);
-
-      LZ4Factory factory = LZ4Factory.fastestInstance();
-      compressor = factory.fastCompressor();
 
       commitExecutor = Executors.newSingleThreadScheduledExecutor(new FlushThreadFactory(storageLocal.getName()));
       lowSpaceEventsPublisher = Executors.newCachedThreadPool(new LowSpaceEventsPublisherFactory(storageLocal.getName()));
@@ -1089,14 +1084,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       fsyncHistogram.outputPercentileDistribution(fsyncStream, 1000.0);
       fsyncStream.close();
 
-      File lz4Log = new File("lz4.hdrp");
-      if (lz4Log.exists())
-        lz4Log.delete();
-
-      PrintStream lz4Stream = new PrintStream(lz4Log);
-      lzSpeedHistogram.outputPercentileDistribution(lz4Stream, 1000.0);
-      lz4Stream.close();
-
       return ds;
     } finally {
       filesLock.releaseWriteLock();
@@ -1699,23 +1686,10 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   private final class PeriodicFlushTask implements Runnable {
-    private long lastFsyncTs = -1;
 
     @Override
     public void run() {
-      long now = System.nanoTime();
-
-      if (lastFsyncTs == -1) {
-        lastFsyncTs = now;
-      } else if (TimeUnit.SECONDS.convert(now - lastFsyncTs, TimeUnit.NANOSECONDS) > 10){
-        try {
-          makeFilesFSync();
-
-          lastFsyncTs = now;
-        } catch (IOException e) {
-          e.printStackTrace();
-        }
-      }
+      scheduleFilesFSync();
 
       final OSessionStoragePerformanceStatistic statistic = performanceStatisticManager.getSessionPerformanceStatistic();
       if (statistic != null)
@@ -1826,6 +1800,22 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       }
 
       return flushedPages;
+    }
+  }
+
+  private void scheduleFilesFSync() {
+    long now = System.nanoTime();
+
+    if (lastFsyncTs == -1) {
+      lastFsyncTs = now;
+    } else if (TimeUnit.SECONDS.convert(now - lastFsyncTs, TimeUnit.NANOSECONDS) > 10) {
+      try {
+        makeFilesFSync();
+
+        lastFsyncTs = now;
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
     }
   }
 
@@ -2047,18 +2037,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     ByteBuffer[] buffers = new ByteBuffer[chunk.size()];
     for (int i = 0; i < buffers.length; i++) {
       final ByteBuffer buffer = chunk.get(i).getValue().getKey();
-
-      long start = System.nanoTime();
       buffer.position(0);
-      compressionBefore += buffer.limit();
-      ByteBuffer compressed = ByteBuffer.allocate(compressor.maxCompressedLength(buffer.limit())).order(ByteOrder.nativeOrder());
-      compressionAfter += compressor.compress(buffer, 0, buffer.limit(), compressed, 0, compressed.limit());
-      compressionCounts++;
-      long end = System.nanoTime();
 
-      lzSpeedHistogram.recordValue(end - start);
-
-      buffer.position(0);
       buffers[i] = buffer;
     }
 
@@ -2129,6 +2109,8 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
     final int flushedPages = chunk.size();
     chunk.clear();
+
+    scheduleFilesFSync();
 
     return flushedPages;
   }
