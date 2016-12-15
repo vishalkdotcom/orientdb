@@ -197,6 +197,10 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       this.writeAheadLog = writeAheadLog;
       this.bufferPool = bufferPool;
 
+      for (int i = 0; i < chunkTimes.length; i++) {
+        chunkTimes[i] = new Histogram(3);
+      }
+
       int writeNormalizedSize = normalizeMemory(exclusiveWriteCacheMaxSize, pageSize);
       if (checkMinSize && writeNormalizedSize < MIN_CACHE_SIZE)
         writeNormalizedSize = MIN_CACHE_SIZE;
