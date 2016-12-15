@@ -54,8 +54,6 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OLogSe
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.OWriteAheadLog;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OPerformanceStatisticManager;
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionStoragePerformanceStatistic;
-import net.jpountz.lz4.LZ4Compressor;
-import net.jpountz.lz4.LZ4Factory;
 import org.HdrHistogram.Histogram;
 
 import java.io.*;
@@ -171,7 +169,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private final OByteBufferPool bufferPool;
 
-  private final Histogram fsyncHistogram   = new Histogram(3);
+  private final Histogram fsyncHistogram = new Histogram(3);
 
   private FLUSH_MODE flushMode = FLUSH_MODE.IDLE;
 
@@ -179,9 +177,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private long lastFsyncTs = -1;
 
-  private long compressionCounts = 0;
-  private long compressionBefore = 0;
-  private long compressionAfter  = 0;
+  private final Histogram[] chunkTimes = new Histogram[CHUNK_SIZE];
 
   /**
    * Listeners which are called when exception in background data flush thread is happened.
@@ -1072,10 +1068,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         counter++;
       }
 
-      if (compressionCounts > 0) {
-        System.out.println("Compression ratio " + ((compressionBefore * 1.0) / compressionAfter));
-      }
-
       File fsyncLog = new File("fsync.hdrp");
       if (fsyncLog.exists())
         fsyncLog.delete();
@@ -1083,6 +1075,18 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       PrintStream fsyncStream = new PrintStream(fsyncLog);
       fsyncHistogram.outputPercentileDistribution(fsyncStream, 1000.0);
       fsyncStream.close();
+
+      for (int i = 0; i < CHUNK_SIZE; i++) {
+        File chunkTime = new File("chunkTime" + (i + 1) + ".hdrp");
+        if (chunkTime.exists())
+          chunkTime.delete();
+
+        if (chunkTimes[i].getTotalCount() != 0) {
+          PrintStream chunkTimeStream = new PrintStream(chunkTime);
+          chunkTimes[i].outputPercentileDistribution(chunkTimeStream, 1000.0);
+          chunkTimeStream.close();
+        }
+      }
 
       return ds;
     } finally {
@@ -2051,7 +2055,11 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     OClosableEntry<Long, OFileClassic> fileEntry = files.acquire(firstFileId);
     try {
       OFileClassic file = fileEntry.get();
+      final long startTime = System.nanoTime();
       file.write(firstPageIndex * pageSize, buffers);
+      final long endTime = System.nanoTime();
+
+      chunkTimes[buffers.length - 1].recordValue(endTime - startTime);
     } catch (IOException e) {
       final File storageDir = new File(storagePath);
 
