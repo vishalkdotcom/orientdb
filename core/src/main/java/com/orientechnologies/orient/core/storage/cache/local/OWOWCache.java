@@ -173,13 +173,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   private long flushedPages = 0;
   private long startFlushTs = -1;
 
-  private AtomicLong fuzzyCheckpointPrevTs      = new AtomicLong(-1);
-  private AtomicLong fuzzyCheckpointCount       = new AtomicLong(0);
-
-  private AtomicLong minFuzzyCheckpointInterval = new AtomicLong(Long.MAX_VALUE);
-  private AtomicLong maxFuzzyCheckpointInterval = new AtomicLong(-1);
-  private AtomicLong fuzzyCheckpointSum         = new AtomicLong(0);
-
   /**
    * Listeners which are called when exception in background data flush thread is happened.
    */
@@ -592,38 +585,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   }
 
   public void makeFuzzyCheckpoint(long segmentId) throws IOException {
-    while (true) {
-      long now = System.nanoTime();
-      long prev = fuzzyCheckpointPrevTs.get();
-
-      if (prev == -1) {
-        if (fuzzyCheckpointPrevTs.compareAndSet(-1, now)) {
-          break;
-        } else {
-          continue;
-        }
-      } else {
-        long duration = now - prev;
-        long min = minFuzzyCheckpointInterval.get();
-        long max = maxFuzzyCheckpointInterval.get();
-
-        if (duration < min) {
-          if (!minFuzzyCheckpointInterval.compareAndSet(min, duration)) {
-            continue;
-          }
-        }
-
-        if (duration > max) {
-          if(!maxFuzzyCheckpointInterval.compareAndSet(max, duration))
-            continue;
-        }
-
-        fuzzyCheckpointCount.incrementAndGet();
-        fuzzyCheckpointSum.addAndGet(duration);
-        break;
-      }
-    }
-
     if (writeAheadLog != null) {
       filesLock.acquireReadLock();
       try {
@@ -1056,15 +1017,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       final long durationInMs = (now - startFlushTs) / 1000000L;
 
       System.out.println("Write speed " + (flushedPages / durationInMs) + " per ms.");
-    }
-
-    if (fuzzyCheckpointCount.get() == 0) {
-      System.out.println("No fuzzy checkpoints");
-    } else {
-      System.out.println("Checkpoint min interval " + minFuzzyCheckpointInterval.get());
-      System.out.println("Checkpoint max interval " + minFuzzyCheckpointInterval.get());
-
-      System.out.println("Checkpoint avg interval " + (fuzzyCheckpointSum.get() / fuzzyCheckpointCount.get()));
     }
 
     if (!commitExecutor.isShutdown()) {
