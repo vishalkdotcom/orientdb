@@ -78,8 +78,7 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
   private final OStorageVariableParser     variableParser;
   private final OPaginatedStorageDirtyFlag dirtyFlag;
 
-  private final String                   storagePath;
-
+  private final String storagePath;
 
   private final OClosableLinkedContainer<Long, OFileClassic> files;
 
@@ -317,7 +316,8 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
     final OWriteAheadLog restoreWAL = new ODiskWriteAheadLog(OGlobalConfiguration.WAL_CACHE_SIZE.getValueAsInteger(),
         OGlobalConfiguration.WAL_COMMIT_TIMEOUT.getValueAsInteger(),
         ((long) OGlobalConfiguration.WAL_MAX_SEGMENT_SIZE.getValueAsInteger()) * ONE_KB * ONE_KB, directory.getAbsolutePath(), this,
-        OGlobalConfiguration.WAL_FILE_AUTOCLOSE_INTERVAL.getValueAsInteger());
+        OGlobalConfiguration.WAL_FILE_AUTOCLOSE_INTERVAL.getValueAsInteger(),
+        OGlobalConfiguration.WAL_SEGMENT_BUFFER_SIZE.getValueAsInteger() * 1024 * 1024);
 
     return restoreWAL;
   }

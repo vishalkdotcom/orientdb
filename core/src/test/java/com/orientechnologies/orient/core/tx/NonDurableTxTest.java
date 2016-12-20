@@ -32,6 +32,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
 
 /**
  * @author Sergey Sitnikov
@@ -107,7 +108,7 @@ public class NonDurableTxTest {
   }
 
   @Test
-  public void testWalNotGrowingWhileWalDisabledInTx() {
+  public void testWalNotGrowingWhileWalDisabledInTx() throws IOException {
     db.newInstance().field("some-unrelated-key", "some-unrelated-value").save();
 
     wal.flush();
@@ -125,7 +126,7 @@ public class NonDurableTxTest {
   }
 
   @Test
-  public void testWalNotGrowingWhileWalDisabledInAtomicManager() {
+  public void testWalNotGrowingWhileWalDisabledInAtomicManager() throws IOException {
     db.newInstance().field("some-unrelated-key", "some-unrelated-value").save();
 
     wal.flush();

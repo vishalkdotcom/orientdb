@@ -194,6 +194,9 @@ public enum OGlobalConfiguration {
       "Interval in seconds after which WAL file will be closed if there is no "
           + "any IO operations on this file (in seconds), default value is 10", Integer.class, 10, false),
 
+  WAL_SEGMENT_BUFFER_SIZE("storage.wal.segmentBufferSize", "Size of the buffer which contains WAL records in serialized format "
+      + "in megabytes", Integer.class, 32),
+
   WAL_MAX_SEGMENT_SIZE("storage.wal.maxSegmentSize", "Maximum size of single WAL segment (in megabytes)", Integer.class, 128),
 
   WAL_MAX_SIZE("storage.wal.maxSize",
@@ -227,7 +230,7 @@ public enum OGlobalConfiguration {
       + " it is highly recommended to use a separate disk to store log operations", String.class, null),
 
   DISK_CACHE_PAGE_SIZE("storage.diskCache.pageSize", "Size of page of disk buffer (in kilobytes). !!! NEVER CHANGE THIS VALUE !!!",
-      Integer.class, 8),
+      Integer.class, 16),
 
   DISK_CACHE_FREE_SPACE_LIMIT("storage.diskCache.diskFreeSpaceLimit", "Minimum amount of space on disk, which, when exceeded, "
       + "will cause the database to switch to read-only mode (in megabytes)", Long.class,

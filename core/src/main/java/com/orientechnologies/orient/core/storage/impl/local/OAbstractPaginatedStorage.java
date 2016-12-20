@@ -85,8 +85,6 @@ import com.orientechnologies.orient.core.storage.impl.local.statistic.OPerforman
 import com.orientechnologies.orient.core.storage.impl.local.statistic.OSessionStoragePerformanceStatistic;
 import com.orientechnologies.orient.core.tx.*;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import org.HdrHistogram.Histogram;
-import org.HdrHistogram.HistogramLogWriter;
 
 import java.io.*;
 import java.text.SimpleDateFormat;

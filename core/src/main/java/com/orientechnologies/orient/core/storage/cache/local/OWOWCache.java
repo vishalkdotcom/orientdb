@@ -168,11 +168,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
   private FLUSH_MODE flushMode = FLUSH_MODE.IDLE;
 
-  private PageKey lastFlushedKey = null;
-
-  private long flushedPages = 0;
-  private long startFlushTs = -1;
-
   /**
    * Listeners which are called when exception in background data flush thread is happened.
    */
@@ -1012,13 +1007,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   public long[] close() throws IOException {
     flush();
 
-    if (flushedPages > 0) {
-      final long now = System.nanoTime();
-      final long durationInMs = (now - startFlushTs) / 1000000L;
-
-      System.out.println("Write speed " + (flushedPages / durationInMs) + " per ms.");
-    }
-
     if (!commitExecutor.isShutdown()) {
       commitExecutor.shutdown();
       try {
@@ -1494,15 +1482,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         writeAheadLog.flush();
     }
 
-    //final byte[] content = new byte[pageSize];
     buffer.position(0);
-    //buffer.get(content);
-
-    //OLongSerializer.INSTANCE.serializeNative(MAGIC_NUMBER, content, 0);
-
-    //  final int crc32 = calculatePageCrc(content);
-    //  OIntegerSerializer.INSTANCE.serializeNative(crc32, content, OLongSerializer.LONG_SIZE);
-
     final long externalId = composeFileId(id, fileId);
     final OClosableEntry<Long, OFileClassic> entry = files.acquire(externalId);
     try {
@@ -1516,7 +1496,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
     }
   }
 
-  private void flushWriteCacheTillLSN(final ByteBuffer buffer) {
+  private void flushWriteCacheTillLSN(final ByteBuffer buffer) throws IOException {
     if (writeAheadLog != null) {
       final OLogSequenceNumber lsn = ODurablePage.getLogSequenceNumberFromPage(buffer);
       final OLogSequenceNumber flushedLSN = writeAheadLog.getFlushedLsn();
@@ -1621,7 +1601,7 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
   private final class FlushTillSegmentTask implements Callable<Void> {
     private final long segmentId;
 
-    public FlushTillSegmentTask(long segmentId) {
+    private FlushTillSegmentTask(long segmentId) {
       this.segmentId = segmentId;
     }
 
@@ -1650,7 +1630,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
 
         return null;
       } finally {
-        OWOWCache.this.flushedPages += flushedPages;
         flushMode = FLUSH_MODE.IDLE;
       }
     }
@@ -1683,10 +1662,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
       try {
         if (writeCachePages.isEmpty()) {
           return;
-        }
-
-        if (startFlushTs == -1) {
-          startFlushTs = System.nanoTime();
         }
 
         // cache is split on two types of buffers
@@ -1750,8 +1725,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         OLogManager.instance().error(this, "Exception during data flush", t);
         t.printStackTrace();
       } finally {
-        OWOWCache.this.flushedPages += flushedPages;
-
         if (statistic != null)
           statistic.stopWriteCacheFlushTimer(flushedPages);
       }
@@ -2057,9 +2030,6 @@ public class OWOWCache extends OAbstractWriteCache implements OWriteCache, OCach
         lock.unlock();
       }
     }
-
-    final OCachePointer cachePointer = chunk.get(chunk.size() - 1).getValue().getValue();
-    lastFlushedKey = new PageKey(internalFileId(cachePointer.getFileId()), cachePointer.getPageIndex());
 
     final int flushedPages = chunk.size();
     chunk.clear();

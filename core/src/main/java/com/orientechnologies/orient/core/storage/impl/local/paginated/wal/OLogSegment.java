@@ -1,6 +1,5 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
-import com.orientechnologies.common.directmemory.OByteBufferPool;
 import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
@@ -14,15 +13,12 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
@@ -30,83 +26,19 @@ import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 
 final class OLogSegment implements Comparable<OLogSegment> {
-  private final OByteBufferPool byteBufferPool = OByteBufferPool.instance();
   private ODiskWriteAheadLog writeAheadLog;
 
-  /**
-   * File which contains WAL segment data.
-   * It is <code>null</code> by default and initialized on request.
-   * <p>
-   * When file is requested and if this file is not file of active WAL segment
-   * then timer which will close file if it is not accessed any more in {@link #fileTTL} seconds will
-   * be started.
-   * <p>
-   * This field is not supposed to be accessed directly please use {@link #getRndFile()} instead.
-   *
-   * @see #closer
-   * @see #fileTTL
-   */
-  private RandomAccessFile rndFile;
+  private final File         file;
+  private final OSegmentFile segmentFile;
 
-  /**
-   * Lock which protects {@link #rndFile} access. Any time you call {@link #getRndFile()} you should also
-   * acquire this lock.
-   */
-  private final Lock fileLock = new ReentrantLock();
-
-  /**
-   * Flag which indicates if auto close timer is started.
-   * This flag is used to guarantee that one and only one instance of auto close timer is active at any moment.
-   *
-   * @see #rndFile
-   */
-  private final AtomicBoolean autoCloseInProgress = new AtomicBoolean();
-
-  /**
-   * Flag which when is set will prevent auto close timer to close of file. But timer itself
-   * will not be stopped.
-   *
-   * @see #rndFile
-   */
-  private volatile boolean preventAutoClose = false;
-
-  private final File file;
-
-  /**
-   * Flag which indicates that file was accessed inside of {@link #fileTTL} which means that file will not be accessed
-   * at least inside of next {@link #fileTTL} interval.
-   */
-  private volatile boolean closeNextTime;
-
-  private volatile long writtenUpTo;
-
-  /**
-   * If {@link #rndFile} will not be accessed inside of this interval (in seconds) it will be closed by timer.
-   *
-   * @see #rndFile
-   */
-  private final int fileTTL;
-
-  /**
-   * Scheduler which will be used to start timer which will close file if last one will not be accessed inside of
-   * {@link #fileTTL} in seconds.
-   *
-   * @see #rndFile
-   */
-  private final ScheduledExecutorService closer = Executors.newScheduledThreadPool(1, new ThreadFactory() {
-    @Override
-    public Thread newThread(Runnable r) {
-      final Thread thread = new Thread(OStorageAbstract.storageThreadGroup, r);
-      thread.setDaemon(true);
-      thread.setName("WAL Closer Task (" + writeAheadLog.getStorage().getName() + ")");
-      return thread;
-    }
-  });
+  private volatile long               writtenUpTo;
+  private volatile OLogSequenceNumber storedUpTo;
 
   private final long order;
   private final int  maxPagesCacheSize;
-  protected final  Lock             cacheLock = new ReentrantLock();
-  private volatile List<OLogRecord> logCache  = new ArrayList<OLogRecord>();
+  protected final Lock cacheLock = new ReentrantLock();
+
+  private volatile List<OLogRecord> writeCache = new ArrayList<OLogRecord>();
 
   private final ScheduledExecutorService commitExecutor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
     @Override
@@ -120,165 +52,96 @@ final class OLogSegment implements Comparable<OLogSegment> {
   private volatile long    filledUpTo;
   private          boolean closed;
   private OLogSequenceNumber last = null;
-  private OLogSequenceNumber pendingLSNToFlush;
 
   private volatile boolean flushNewData = true;
 
   private WeakReference<OPair<OLogSequenceNumber, byte[]>> lastReadRecord = new WeakReference<OPair<OLogSequenceNumber, byte[]>>(
       null);
 
-  //start of properties shared between FlushTasks which are ran using the SAME thread
-  private ByteBuffer lastWrittenPage      = null;
-  private long       lastWrittenPageIndex = -1;
-  private boolean    lastPageIsFull       = false;
-
-  private long lastFSyncTime = -1;
-  private long             startPageIndex = -1;
-  private List<ByteBuffer> pagesToFlush   = new ArrayList<ByteBuffer>();
-
-  private OLogSequenceNumber lastSerializedLSN = null;
-
-  private boolean pendingFSync = false;
-
-  private long serializedUpTo = 0;
-  //end of properties shared between FlushTasks
-
-  private final class FlushTask implements Runnable {
-    private final long fsyncInterval = writeAheadLog.getCommitDelay() * 1000000L;
-    private final boolean forceFSync;
-
-    private FlushTask(boolean forceFSync) {
-      this.forceFSync = forceFSync;
+  private final class WriteTask implements Runnable {
+    private WriteTask() {
     }
 
     @Override
     public void run() {
       try {
-        serializePendingRecords();
-
-        flushAndSyncPages(forceFSync);
-      } catch (Throwable e) {
-        File parent = file.getParentFile();
-
-        final long freeSpace = parent.getFreeSpace();
-        final long usableSpace = parent.getUsableSpace();
-
-        OLogManager.instance()
-            .error(this, "Error during WAL background flush, free space " + freeSpace + ", usable space " + usableSpace, e);
-
-      }
-    }
-
-    private void serializePendingRecords() throws IOException {
-      if (!flushNewData)
-        return;
-
-      flushNewData = false;
-
-      List<OLogRecord> toFlush;
-      try {
-        cacheLock.lock();
-        if (logCache.isEmpty())
+        if (!flushNewData)
           return;
 
-        toFlush = logCache;
-        logCache = new ArrayList<OLogRecord>();
-      } finally {
-        cacheLock.unlock();
-      }
+        flushNewData = false;
 
-      ByteBuffer buffer;
-      boolean fetchedFromList = false;
+        List<OLogRecord> toFlush;
+        try {
+          cacheLock.lock();
+          if (writeCache.isEmpty())
+            return;
 
-      OLogRecord first = toFlush.get(0);
-      long curPageIndex = first.writeFrom / OWALPage.PAGE_SIZE;
-
-      if (pagesToFlush.isEmpty()) {
-        startPageIndex = curPageIndex;
-
-        if (lastWrittenPage == null) {
-          fileLock.lock();
-          try {
-            buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
-            final RandomAccessFile rndFile = getRndFile();
-
-            long pagesCount = rndFile.length() / OWALPage.PAGE_SIZE;
-            if (pagesCount > curPageIndex) {
-              FileChannel channel = rndFile.getChannel();
-              channel.read(buffer, curPageIndex * OWALPage.PAGE_SIZE);
-            }
-          } finally {
-            fileLock.unlock();
-          }
-        } else {
-          if (lastWrittenPageIndex == curPageIndex) {
-            buffer = lastWrittenPage;
-          } else {
-            buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
-          }
+          toFlush = writeCache;
+          writeCache = new ArrayList<OLogRecord>();
+        } finally {
+          cacheLock.unlock();
         }
-      } else {
-        int index = (int) (curPageIndex - startPageIndex);
 
-        if (index < pagesToFlush.size()) {
-          assert index == pagesToFlush.size() - 1;
+        ByteBuffer buffer;
+        OLogRecord first = toFlush.get(0);
+        long curPageIndex = first.writeFrom / OWALPage.PAGE_SIZE;
 
-          buffer = pagesToFlush.get(index);
-          fetchedFromList = true;
+        final long filledUpTo = segmentFile.filledUpTo();
+        if (filledUpTo > curPageIndex) {
+          assert filledUpTo - 1 == curPageIndex;
+
+          buffer = segmentFile.readPageBuffer(curPageIndex);
         } else {
           buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
         }
-      }
 
-      OLogSequenceNumber lsn = null;
-      boolean lastToFlush = false;
+        OLogSequenceNumber lsn;
+        boolean lastToFlush = false;
 
-      for (OLogRecord log : toFlush) {
-        lsn = new OLogSequenceNumber(order, log.writeFrom);
-        int pos = (int) (log.writeFrom % OWALPage.PAGE_SIZE);
-        int written = 0;
+        for (OLogRecord log : toFlush) {
+          lsn = new OLogSequenceNumber(order, log.writeFrom);
 
-        while (written < log.record.length) {
-          lastToFlush = true;
+          int pos = (int) (log.writeFrom % OWALPage.PAGE_SIZE);
+          int written = 0;
 
-          int pageFreeSpace = OWALPage.calculateRecordSize(OWALPage.PAGE_SIZE - pos);
-          int contentLength = Math.min(pageFreeSpace, (log.record.length - written));
-          int fromRecord = written;
-          written += contentLength;
+          while (written < log.record.length) {
+            lastToFlush = true;
 
-          lastPageIsFull = false;
-          pos = writeContentInPage(buffer, pos, log.record, written == log.record.length, fromRecord, contentLength);
+            int pageFreeSpace = OWALPage.calculateRecordSize(OWALPage.PAGE_SIZE - pos);
+            int contentLength = Math.min(pageFreeSpace, (log.record.length - written));
+            int fromRecord = written;
+            written += contentLength;
 
-          if (OWALPage.PAGE_SIZE - pos < OWALPage.MIN_RECORD_SIZE) {
-            preparePageForFlush(buffer);
+            pos = writeContentInPage(buffer, pos, log.record, written == log.record.length, fromRecord, contentLength);
 
-            if (!fetchedFromList) {
-              pagesToFlush.add(buffer);
+            if (OWALPage.PAGE_SIZE - pos < OWALPage.MIN_RECORD_SIZE) {
+              preparePageForFlush(buffer);
+
+              segmentFile.writePage(buffer, curPageIndex);
+
+              buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+              curPageIndex++;
+
+              lastToFlush = false;
+
+              pos = OWALPage.RECORDS_OFFSET;
             }
-            lastPageIsFull = true;
-
-            buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
-
-            lastToFlush = false;
-            fetchedFromList = false;
-
-            pos = OWALPage.RECORDS_OFFSET;
           }
+
+          writtenUpTo = log.writeTo;
+          storedUpTo = lsn;
         }
 
-        serializedUpTo = log.writeTo;
-      }
+        if (lastToFlush) {
+          preparePageForFlush(buffer);
 
-      if (lastToFlush) {
-        preparePageForFlush(buffer);
-
-        if (!fetchedFromList) {
-          pagesToFlush.add(buffer);
+          segmentFile.writePage(buffer, curPageIndex);
         }
-      }
 
-      if (lsn != null)
-        lastSerializedLSN = lsn;
+        writeAheadLog.checkFreeSpace();
+      } catch (Throwable e) {
+        OLogManager.instance().error(this, "Error during WAL background flush", e);
+      }
     }
 
     /**
@@ -317,98 +180,42 @@ final class OLogSegment implements Comparable<OLogSegment> {
       crc32.update(data);
       content.putInt(OWALPage.CRC_OFFSET, (int) crc32.getValue());
     }
+  }
 
-    private void flushAndSyncPages(boolean forceFSync) throws IOException {
-      final long fsyncTs = System.nanoTime();
-
-      boolean pending = pagesToFlush.size() * OWALPage.PAGE_SIZE >= (4 * 1024 * 1024 + OWALPage.PAGE_SIZE);
-      boolean fsync =
-          forceFSync || ((pendingFSync || pending) && ((fsyncTs - lastFSyncTime) >= fsyncInterval || lastFSyncTime == -1));
-
-      fileLock.lock();
+  private final class FSyncer implements Runnable {
+    @Override
+    public void run() {
       try {
-        if (pending || fsync) {
-          final RandomAccessFile rndFile = getRndFile();
-          final FileChannel channel = rndFile.getChannel();
-
-          if (!pagesToFlush.isEmpty()) {
-            final ByteBuffer[] buffers = pagesToFlush.toArray(new ByteBuffer[0]);
-            pagesToFlush.clear();
-
-            for (ByteBuffer buffer : buffers) {
-              buffer.position(0);
-            }
-
-            channel.position(startPageIndex * OWALPage.PAGE_SIZE);
-
-            if (lastPageIsFull) {
-              channel.write(buffers);
-
-              lastWrittenPage = null;
-              lastWrittenPageIndex = -1;
-              lastPageIsFull = false;
-            } else {
-              lastWrittenPage = buffers[buffers.length - 1];
-              lastWrittenPageIndex = startPageIndex + buffers.length;
-
-              if (!fsync) {
-                if (buffers.length > 1) {
-                  final ByteBuffer[] data = new ByteBuffer[buffers.length - 1];
-                  System.arraycopy(buffers, 0, data, 0, buffers.length - 1);
-                  channel.write(data);
-                }
-              } else {
-                channel.write(buffers);
-              }
-            }
-
-            writtenUpTo = serializedUpTo;
-            startPageIndex = -1;
-            pendingFSync = true;
-
-            writeAheadLog.checkFreeSpace();
-          }
-
-          if (fsync) {
-            assert pagesToFlush.isEmpty();
-
-            channel.force(false);
-
-            if (lastSerializedLSN != null) {
-              writeAheadLog.setFlushedLsn(lastSerializedLSN);
-              lastSerializedLSN = null;
-            }
-
-            lastFSyncTime = fsyncTs;
-            pendingFSync = false;
-          }
-        }
-      } finally {
-        fileLock.unlock();
+        fsync();
+      } catch (IOException ioe) {
+        OLogManager.instance().error(this, "Can not force sync content of file " + file.getName());
       }
     }
   }
 
-  OLogSegment(ODiskWriteAheadLog writeAheadLog, File file, int fileTTL, int maxPagesCacheSize) throws IOException {
+  OLogSegment(ODiskWriteAheadLog writeAheadLog, File file, int fileTTL, int maxPagesCacheSize, int segmentBufferSize)
+      throws IOException {
     this.writeAheadLog = writeAheadLog;
     this.file = file;
-    this.fileTTL = fileTTL;
     this.maxPagesCacheSize = maxPagesCacheSize;
 
+    this.segmentFile = new OSegmentFile(file, fileTTL, segmentBufferSize);
+    this.segmentFile.open();
+
     order = extractOrder(file.getName());
+
     closed = false;
   }
 
-  public void startFlush() {
+  void startFlush() {
     if (writeAheadLog.getCommitDelay() > 0) {
-      commitExecutor.scheduleAtFixedRate(new FlushTask(false), 1, 1, TimeUnit.MILLISECONDS);
-
-      //if WAL segment is active (all content is written in this segment) we should not try to close it after TTL.
-      preventAutoClose = true;
+      commitExecutor.scheduleAtFixedRate(new WriteTask(), 100, 100, TimeUnit.MICROSECONDS);
+      commitExecutor.scheduleAtFixedRate(new FSyncer(), writeAheadLog.getCommitDelay(), writeAheadLog.getCommitDelay(),
+          TimeUnit.MILLISECONDS);
     }
   }
 
-  public void stopFlush(boolean flush) {
+  public void stopFlush(boolean flush) throws IOException {
     if (flush)
       flush();
 
@@ -422,40 +229,13 @@ final class OLogSegment implements Comparable<OLogSegment> {
         OLogManager.instance().error(this, "Cannot shutdown background WAL commit thread");
       }
     }
-
-    //segment is not active any more we should start file auto close
-    preventAutoClose = false;
   }
 
-  /**
-   * Returns active instance of file which is associated with given WAL segment
-   * Call of this method should always be protected by {@link #fileLock}.
-   *
-   * @return Active instance of file which is associated with given WAL segment
-   */
-  private RandomAccessFile getRndFile() throws IOException {
-    if (rndFile == null) {
-      rndFile = new RandomAccessFile(file, "rw");
-      scheduleFileAutoClose();
-    } else {
-      closeNextTime = false;
-    }
+  private void fsync() throws IOException {
+    OLogSequenceNumber stored = storedUpTo;
+    segmentFile.sync();
 
-    return rndFile;
-  }
-
-  /**
-   * Start timer thread which will auto close file if it is not accesses during {@link #fileTTL} seconds.
-   * If file is already closed timer thread will be terminate itself till it will not be started again by
-   * {@link #getRndFile()} call.
-   */
-  private void scheduleFileAutoClose() {
-    if (!autoCloseInProgress.get() && autoCloseInProgress.compareAndSet(false, true)) {
-      closeNextTime = true;
-      final FileCloser task = new FileCloser();
-      task.self = closer.scheduleWithFixedDelay(task, fileTTL, fileTTL, TimeUnit.SECONDS);
-
-    }
+    writeAheadLog.casFlushedLsn(stored);
   }
 
   public long getOrder() {
@@ -463,8 +243,6 @@ final class OLogSegment implements Comparable<OLogSegment> {
   }
 
   public void init() throws IOException {
-    selfCheck();
-
     initPageCache();
 
     last = new OLogSequenceNumber(order, filledUpTo - 1);
@@ -505,19 +283,11 @@ final class OLogSegment implements Comparable<OLogSegment> {
   }
 
   public OLogSequenceNumber begin() throws IOException {
-    if (!logCache.isEmpty())
+    if (!writeCache.isEmpty())
       return new OLogSequenceNumber(order, OWALPage.RECORDS_OFFSET);
 
-    fileLock.lock();
-    try {
-      final RandomAccessFile rndFile = getRndFile();
-
-      if (rndFile.length() > 0)
-        return new OLogSequenceNumber(order, OWALPage.RECORDS_OFFSET);
-
-    } finally {
-      fileLock.unlock();
-    }
+    if (segmentFile.filledUpTo() > 0)
+      return new OLogSequenceNumber(order, OWALPage.RECORDS_OFFSET);
 
     return null;
   }
@@ -604,7 +374,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
     last = new OLogSequenceNumber(order, rec.writeFrom);
     try {
       cacheLock.lock();
-      logCache.add(rec);
+      writeCache.add(rec);
     } finally {
       cacheLock.unlock();
     }
@@ -617,7 +387,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
       writeAheadLog.incrementCacheOverflowCount();
 
       try {
-        commitExecutor.submit(new FlushTask(false)).get();
+        commitExecutor.submit(new WriteTask()).get();
       } catch (InterruptedException e) {
         Thread.interrupted();
         throw OException.wrapException(new OStorageException("Thread was interrupted during WAL write"), e);
@@ -639,8 +409,8 @@ final class OLogSegment implements Comparable<OLogSegment> {
     if (lsn.getPosition() >= filledUpTo)
       return null;
 
-    if (!logCache.isEmpty())
-      flush();
+    if (!writeCache.isEmpty())
+      writeData();
 
     long pageIndex = lsn.getPosition() / OWALPage.PAGE_SIZE;
 
@@ -650,48 +420,35 @@ final class OLogSegment implements Comparable<OLogSegment> {
     long pageCount = (filledUpTo + OWALPage.PAGE_SIZE - 1) / OWALPage.PAGE_SIZE;
 
     while (pageIndex < pageCount) {
-      byte[] pageContent = new byte[OWALPage.PAGE_SIZE];
-      fileLock.lock();
-      try {
-        final RandomAccessFile rndFile = getRndFile();
-        rndFile.seek(pageIndex * OWALPage.PAGE_SIZE);
-        rndFile.readFully(pageContent);
-      } finally {
-        fileLock.unlock();
-      }
+      byte[] pageContent = segmentFile.readPage(pageIndex);
 
       if (!checkPageIntegrity(pageContent))
         throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
 
-      final ByteBuffer buffer = byteBufferPool.acquireDirect(false);
-      buffer.put(pageContent);
-      try {
-        OWALPage page = new OWALPage(buffer, false);
+      final ByteBuffer buffer = ByteBuffer.wrap(pageContent).order(ByteOrder.nativeOrder());
+      OWALPage page = new OWALPage(buffer, false);
 
-        byte[] content = page.getRecord(pageOffset);
-        if (record == null)
-          record = content;
-        else {
-          byte[] oldRecord = record;
+      byte[] content = page.getRecord(pageOffset);
+      if (record == null)
+        record = content;
+      else {
+        byte[] oldRecord = record;
 
-          record = new byte[record.length + content.length];
-          System.arraycopy(oldRecord, 0, record, 0, oldRecord.length);
-          System.arraycopy(content, 0, record, oldRecord.length, record.length - oldRecord.length);
-        }
+        record = new byte[record.length + content.length];
+        System.arraycopy(oldRecord, 0, record, 0, oldRecord.length);
+        System.arraycopy(content, 0, record, oldRecord.length, record.length - oldRecord.length);
+      }
 
-        if (page.mergeWithNextPage(pageOffset)) {
-          pageOffset = OWALPage.RECORDS_OFFSET;
-          pageIndex++;
-          if (pageIndex >= pageCount)
-            throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
-        } else {
-          if (page.getFreeSpace() >= OWALPage.MIN_RECORD_SIZE && pageIndex < pageCount - 1)
-            throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
+      if (page.mergeWithNextPage(pageOffset)) {
+        pageOffset = OWALPage.RECORDS_OFFSET;
+        pageIndex++;
+        if (pageIndex >= pageCount)
+          throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
+      } else {
+        if (page.getFreeSpace() >= OWALPage.MIN_RECORD_SIZE && pageIndex < pageCount - 1)
+          throw new OWALPageBrokenException("WAL page with index " + pageIndex + " is broken");
 
-          break;
-        }
-      } finally {
-        byteBufferPool.release(buffer);
+        break;
       }
     }
 
@@ -741,50 +498,28 @@ final class OLogSegment implements Comparable<OLogSegment> {
 
       stopFlush(flush);
 
-      if (!closer.isShutdown()) {
-        closer.shutdown();
-        try {
-          if (!closer.awaitTermination(OGlobalConfiguration.WAL_SHUTDOWN_TIMEOUT.getValueAsInteger(), TimeUnit.MILLISECONDS))
-            throw new OStorageException("WAL file auto close task '" + getPath() + "' cannot be stopped");
-
-        } catch (InterruptedException e) {
-          OLogManager.instance().error(this, "Shutdown of file auto close thread was interrupted");
-        }
-      }
-
-      fileLock.lock();
-      try {
-        if (rndFile != null) {
-          rndFile.close();
-          rndFile = null;
-        }
-      } finally {
-        fileLock.unlock();
-      }
+      segmentFile.close(flush);
 
       closed = true;
     }
   }
 
-  public OLogSequenceNumber readFlushedLSN() throws IOException {
-    fileLock.lock();
-    try {
-      final RandomAccessFile rndFile = getRndFile();
-
-      long pages = rndFile.length() / OWALPage.PAGE_SIZE;
-      if (pages == 0)
-        return null;
-    } finally {
-      fileLock.unlock();
-    }
+  OLogSequenceNumber readFlushedLSN() throws IOException {
+    if (segmentFile.filledUpTo() == 0)
+      return null;
 
     return new OLogSequenceNumber(order, filledUpTo - 1);
   }
 
-  public void flush() {
+  public void flush() throws IOException {
+    writeData();
+    fsync();
+  }
+
+  private void writeData() {
     if (!commitExecutor.isShutdown()) {
       try {
-        commitExecutor.submit(new FlushTask(true)).get();
+        commitExecutor.submit(new WriteTask()).get();
       } catch (InterruptedException e) {
         Thread.interrupted();
         throw OException.wrapException(new OStorageException("Thread was interrupted during flush"), e);
@@ -792,30 +527,21 @@ final class OLogSegment implements Comparable<OLogSegment> {
         throw OException.wrapException(new OStorageException("Error during WAL segment '" + getPath() + "' flush"), e);
       }
     } else {
-      new FlushTask(true).run();
+      new WriteTask().run();
     }
   }
 
   private void initPageCache() throws IOException {
-    fileLock.lock();
-    try {
-      final RandomAccessFile rndFile = getRndFile();
-      long pagesCount = rndFile.length() / OWALPage.PAGE_SIZE;
-      if (pagesCount == 0)
-        return;
+    long pagesCount = segmentFile.filledUpTo();
+    if (pagesCount == 0)
+      return;
 
-      rndFile.seek((pagesCount - 1) * OWALPage.PAGE_SIZE);
-      byte[] content = new byte[OWALPage.PAGE_SIZE];
-      rndFile.readFully(content);
-
-      if (checkPageIntegrity(content)) {
-        int freeSpace = OIntegerSerializer.INSTANCE.deserializeNative(content, OWALPage.FREE_SPACE_OFFSET);
-        filledUpTo = (pagesCount - 1) * OWALPage.PAGE_SIZE + (OWALPage.PAGE_SIZE - freeSpace);
-      } else {
-        filledUpTo = pagesCount * OWALPage.PAGE_SIZE + OWALPage.RECORDS_OFFSET;
-      }
-    } finally {
-      fileLock.unlock();
+    final byte[] content = segmentFile.readPage(pagesCount - 1);
+    if (checkPageIntegrity(content)) {
+      int freeSpace = OIntegerSerializer.INSTANCE.deserializeNative(content, OWALPage.FREE_SPACE_OFFSET);
+      filledUpTo = (pagesCount - 1) * OWALPage.PAGE_SIZE + (OWALPage.PAGE_SIZE - freeSpace);
+    } else {
+      filledUpTo = pagesCount * OWALPage.PAGE_SIZE + OWALPage.RECORDS_OFFSET;
     }
   }
 
@@ -845,77 +571,7 @@ final class OLogSegment implements Comparable<OLogSegment> {
     return ((int) crc32.getValue()) == OIntegerSerializer.INSTANCE.deserializeNative(content, 0);
   }
 
-  private void selfCheck() throws IOException {
-    if (!logCache.isEmpty())
-      throw new IllegalStateException("WAL cache is not empty, we cannot verify WAL after it was started to be used");
-
-    fileLock.lock();
-    try {
-      final RandomAccessFile rndFile = getRndFile();
-      long pagesCount = rndFile.length() / OWALPage.PAGE_SIZE;
-
-      if (rndFile.length() % OWALPage.PAGE_SIZE > 0) {
-        OLogManager.instance().error(this, "Last WAL page was written partially, auto fix");
-
-        rndFile.setLength(OWALPage.PAGE_SIZE * pagesCount);
-      }
-    } finally {
-      fileLock.unlock();
-    }
-  }
-
   public long getFilledUpTo() {
     return filledUpTo;
   }
-
-  /**
-   * Timer task which is used to close file if it is not accessed during {@link #fileTTL} interval.
-   */
-  class FileCloser implements Runnable {
-    private          boolean            stopped = false;
-    private volatile ScheduledFuture<?> self    = null;
-
-    @Override
-    public void run() {
-      if (stopped) {
-        //this task is finished we should stop its execution
-        if (self != null) {
-          self.cancel(false);
-        }
-
-        return;
-      }
-
-      if (preventAutoClose) {
-        return;
-      }
-
-      fileLock.lock();
-      try {
-        if (closeNextTime) {
-          try {
-            if (rndFile != null) {
-              rndFile.close();
-              rndFile = null;
-            }
-          } catch (IOException e) {
-            OLogManager.instance().error(this, "Can not auto close file in WAL", e);
-          }
-
-          autoCloseInProgress.set(false);
-          stopped = true;
-
-          if (self != null)
-            self.cancel(false);
-
-        } else {
-          //reschedule himself
-          closeNextTime = true;
-        }
-      } finally {
-        fileLock.unlock();
-      }
-    }
-  }
-
 }
