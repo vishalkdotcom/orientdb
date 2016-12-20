@@ -29,6 +29,9 @@ public class OSegmentFile {
   private final int fileTTL;
   private final int bufferSize;
 
+  private long lastWrittenPageIndex = -1;
+  private ByteBuffer lastWrittenPage;
+
   private ScheduledExecutorService closer;
 
   public OSegmentFile(final File file, int fileTTL, int bufferSize) {
@@ -61,6 +64,9 @@ public class OSegmentFile {
         pageCache.add(page);
         firstCachedPage = pageIndex;
       }
+
+      lastWrittenPage = page;
+      lastWrittenPageIndex = pageIndex;
 
       if (pageCache.size() * OWALPage.PAGE_SIZE >= bufferSize + OWALPage.PAGE_SIZE) {
         flushAllBufferPagesExceptLastOne();
@@ -108,31 +114,44 @@ public class OSegmentFile {
     }
   }
 
-  public byte[] readPage(long position) throws IOException {
+  public byte[] readPage(long pageIndex) throws IOException {
     synchronized (lockObject) {
       lastAccessTime = System.nanoTime();
 
-      if (position >= firstCachedPage && position < firstCachedPage + pageCache.size()) {
-        final ByteBuffer buffer = pageCache.get((int) (position - firstCachedPage));
+      if (pageIndex == lastWrittenPageIndex) {
+        return lastWrittenPage.array();
+      }
+
+      if (pageIndex >= firstCachedPage && pageIndex < firstCachedPage + pageCache.size()) {
+        final ByteBuffer buffer = pageCache.get((int) (pageIndex - firstCachedPage));
         return buffer.array();
       }
 
       final ByteBuffer buffer = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
 
       initFile();
-      segChannel.read(buffer, position * OWALPage.PAGE_SIZE);
+      segChannel.read(buffer, pageIndex * OWALPage.PAGE_SIZE);
       buffer.position(0);
 
       return buffer.array();
     }
   }
 
-  public ByteBuffer readPageBuffer(long position) throws IOException {
+  public ByteBuffer readPageBuffer(long pageIndex) throws IOException {
     synchronized (lockObject) {
       lastAccessTime = System.nanoTime();
 
-      if (position >= firstCachedPage && position < firstCachedPage + pageCache.size()) {
-        final ByteBuffer buffer = pageCache.get((int) (position - firstCachedPage));
+      if (pageIndex == lastWrittenPageIndex) {
+        final ByteBuffer copy = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
+
+        lastWrittenPage.position(0);
+        copy.put(lastWrittenPage);
+
+        return copy;
+      }
+
+      if (pageIndex >= firstCachedPage && pageIndex < firstCachedPage + pageCache.size()) {
+        final ByteBuffer buffer = pageCache.get((int) (pageIndex - firstCachedPage));
         final ByteBuffer copy = ByteBuffer.allocate(OWALPage.PAGE_SIZE).order(ByteOrder.nativeOrder());
 
         buffer.position(0);
@@ -145,7 +164,7 @@ public class OSegmentFile {
 
       initFile();
 
-      segChannel.read(buffer, position * OWALPage.PAGE_SIZE);
+      segChannel.read(buffer, pageIndex * OWALPage.PAGE_SIZE);
       buffer.position(0);
 
       return buffer;
@@ -240,6 +259,12 @@ public class OSegmentFile {
 
         segFile.setLength(OWALPage.PAGE_SIZE * pagesCount);
       }
+
+      firstCachedPage = -1;
+      pageCache.clear();
+
+      lastWrittenPage = null;
+      lastWrittenPageIndex = -1;
     }
   }
 
