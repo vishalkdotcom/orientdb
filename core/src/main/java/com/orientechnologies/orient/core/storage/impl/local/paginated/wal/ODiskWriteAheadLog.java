@@ -366,7 +366,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
     if (statistic != null)
       statistic.startWALLogRecordTimer();
     try {
-      OAtomicUnitStartRecord record = new OAtomicUnitStartRecord(isRollbackSupported, unitId);
+      OAtomicUnitStartRecord record = new OAtomicUnitStartRecord(unitId);
       byte[] content = OWALRecordsFactory.INSTANCE.toStream(record);
       syncObject.lock();
       try {

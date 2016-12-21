@@ -21,6 +21,7 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
 import com.orientechnologies.common.serialization.types.OLongSerializer;
+import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin
@@ -43,8 +44,7 @@ public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
   public int toStream(byte[] content, int offset) {
     offset = super.toStream(content, offset);
 
-    OLongSerializer.INSTANCE.serializeNative(pageIndex, content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    offset = OVarIntSerializer.writeUnsignedLong(pageIndex, content, offset);
 
     OLongSerializer.INSTANCE.serializeNative(fileId, content, offset);
     offset += OLongSerializer.LONG_SIZE;
@@ -56,8 +56,9 @@ public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
   public int fromStream(byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
-    pageIndex = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    long[] res = OVarIntSerializer.readUnsignedLong(content, offset);
+    pageIndex = res[0];
+    offset = (int) res[1];
 
     fileId = OLongSerializer.INSTANCE.deserializeNative(content, offset);
     offset += OLongSerializer.LONG_SIZE;
@@ -67,7 +68,7 @@ public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + 2 * OLongSerializer.LONG_SIZE;
+    return super.serializedSize() + OLongSerializer.LONG_SIZE + OVarIntSerializer.computeUnsignedLongSize(pageIndex);
   }
 
   public long getPageIndex() {

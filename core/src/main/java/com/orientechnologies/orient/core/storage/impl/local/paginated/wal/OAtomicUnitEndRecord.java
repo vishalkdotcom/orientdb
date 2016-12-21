@@ -40,8 +40,6 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.atomicoper
  * @since 24.05.13
  */
 public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
-  private boolean                                  rollback;
-
   private Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap = new LinkedHashMap<String, OAtomicOperationMetadata<?>>();
 
   public OAtomicUnitEndRecord() {
@@ -51,8 +49,6 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
       final Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap) throws IOException {
     super(operationUnitId);
 
-    this.rollback = rollback;
-
     assert operationUnitId != null;
 
     if (atomicOperationMetadataMap != null && atomicOperationMetadataMap.size() > 0) {
@@ -60,16 +56,9 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
     }
   }
 
-  public boolean isRollback() {
-    return rollback;
-  }
-
   @Override
   public int toStream(final byte[] content, int offset) {
     offset = super.toStream(content, offset);
-
-    content[offset] = rollback ? (byte) 1 : 0;
-    offset++;
 
     if (atomicOperationMetadataMap.size() > 0) {
       for (Map.Entry<String, OAtomicOperationMetadata<?>> entry : atomicOperationMetadataMap.entrySet()) {
@@ -104,9 +93,6 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
   public int fromStream(final byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
-    rollback = content[offset] > 0;
-    offset++;
-
     atomicOperationMetadataMap = new LinkedHashMap<String, OAtomicOperationMetadata<?>>();
 
     final int metadataId = content[offset];
@@ -140,7 +126,7 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + OByteSerializer.BYTE_SIZE + metadataSize();
+    return super.serializedSize() + metadataSize();
   }
 
   private int metadataSize() {
@@ -164,10 +150,5 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
   @Override
   public boolean isUpdateMasterRecord() {
     return false;
-  }
-
-  @Override
-  public String toString() {
-    return toString("rollback=" + rollback);
   }
 }

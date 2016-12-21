@@ -21,6 +21,7 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
 import com.orientechnologies.common.serialization.types.OLongSerializer;
+import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin
@@ -51,11 +52,8 @@ public abstract class OAbstractCheckPointStartRecord extends OAbstractWALRecord 
     content[offset] = 1;
     offset++;
 
-    OLongSerializer.INSTANCE.serializeNative(previousCheckpoint.getSegment(), content, offset);
-    offset += OLongSerializer.LONG_SIZE;
-
-    OLongSerializer.INSTANCE.serializeNative(previousCheckpoint.getPosition(), content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    offset = OVarIntSerializer.writeUnsignedLong(previousCheckpoint.getSegment(), content, offset);
+    offset = OVarIntSerializer.writeUnsignedLong(previousCheckpoint.getPosition(), content, offset);
 
     return offset;
   }
@@ -69,11 +67,13 @@ public abstract class OAbstractCheckPointStartRecord extends OAbstractWALRecord 
 
     offset++;
 
-    long segment = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    long[] res = OVarIntSerializer.readUnsignedLong(content, offset);
+    long segment = res[0];
+    offset = (int) res[1];
 
-    long position = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    res = OVarIntSerializer.readUnsignedLong(content, offset);
+    long position = res[0];
+    offset = (int) res[1];
 
     previousCheckpoint = new OLogSequenceNumber(segment, position);
 
@@ -85,7 +85,8 @@ public abstract class OAbstractCheckPointStartRecord extends OAbstractWALRecord 
     if (previousCheckpoint == null)
       return 1;
 
-    return 2 * OLongSerializer.LONG_SIZE + 1;
+    return OVarIntSerializer.computeUnsignedLongSize(previousCheckpoint.getSegment()) + OVarIntSerializer
+        .computeUnsignedLongSize(previousCheckpoint.getPosition()) + 1;
   }
 
   @Override

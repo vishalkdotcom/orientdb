@@ -20,7 +20,7 @@
 
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
-import com.orientechnologies.common.serialization.types.OLongSerializer;
+import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin
@@ -43,11 +43,8 @@ public class OFuzzyCheckpointStartRecord extends OAbstractCheckPointStartRecord 
   public int toStream(byte[] content, int offset) {
     offset = super.toStream(content, offset);
 
-    OLongSerializer.INSTANCE.serializeNative(flushedLsn.getSegment(), content, offset);
-    offset += OLongSerializer.LONG_SIZE;
-
-    OLongSerializer.INSTANCE.serializeNative(flushedLsn.getPosition(), content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    offset = OVarIntSerializer.writeUnsignedLong(flushedLsn.getSegment(), content, offset);
+    offset = OVarIntSerializer.writeUnsignedLong(flushedLsn.getPosition(), content, offset);
 
     return offset;
   }
@@ -56,11 +53,13 @@ public class OFuzzyCheckpointStartRecord extends OAbstractCheckPointStartRecord 
   public int fromStream(byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
-    long segment = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    long[] res = OVarIntSerializer.readUnsignedLong(content, offset);
+    long segment = res[0];
+    offset = (int) res[1];
 
-    long position = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    res = OVarIntSerializer.readUnsignedLong(content, offset);
+    long position = res[0];
+    offset = (int) res[1];
 
     flushedLsn = new OLogSequenceNumber(segment, position);
 
@@ -69,7 +68,8 @@ public class OFuzzyCheckpointStartRecord extends OAbstractCheckPointStartRecord 
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + 2 * OLongSerializer.LONG_SIZE;
+    return super.serializedSize() + OVarIntSerializer.computeUnsignedLongSize(flushedLsn.getSegment()) + OVarIntSerializer
+        .computeUnsignedLongSize(flushedLsn.getPosition());
   }
 
   public OLogSequenceNumber getFlushedLsn() {
