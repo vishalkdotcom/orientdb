@@ -364,13 +364,12 @@ public class LocalPaginatedClusterWithWALTest extends LocalPaginatedClusterTest 
                 .replace("actualPaginatedClusterWithWALTest", "expectedPaginatedClusterWithWALTest");
 
             if (!expectedWriteCache.exists(fileName))
-              expectedReadCache
-                  .addFile(fileName, expectedWriteCache.externalFileId(fileCreatedCreatedRecord.getFileId()), expectedWriteCache);
+              expectedReadCache.addFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
 
           } else {
             final OUpdatePageRecord updatePageRecord = (OUpdatePageRecord) restoreRecord;
 
-            final long fileId = expectedWriteCache.externalFileId(updatePageRecord.getFileId());
+            final long fileId = updatePageRecord.getFileId();
             final long pageIndex = updatePageRecord.getPageIndex();
 
             OCacheEntry cacheEntry = expectedReadCache.loadForWrite(fileId, pageIndex, true, expectedWriteCache, 1);

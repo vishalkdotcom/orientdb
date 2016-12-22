@@ -53,10 +53,13 @@ public class OVarIntSerializer {
    * href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>. It uses zig-zag encoding to
    * efficiently encode signed values. If values are known to be nonnegative, {@link #writeUnsignedVarLong(long, DataOutput)} should
    * be used.
-   *
-   * @param value value to encode
-   * @param out   to write bytes to
-   * @throws IOException if {@link DataOutput} throws {@link IOException}
+   * 
+   * @param value
+   *          value to encode
+   * @param out
+   *          to write bytes to
+   * @throws IOException
+   *           if {@link DataOutput} throws {@link IOException}
    */
   private static long signedToUnsigned(long value) {
     return (value << 1) ^ (value >> 63);
@@ -67,11 +70,14 @@ public class OVarIntSerializer {
    * href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>. Zig-zag is not used, so
    * input must not be negative. If values can be negative, use {@link #writeSignedVarLong(long, DataOutput)} instead. This method
    * treats negative input as like a large unsigned value.
-   *
-   * @param value value to encode
-   * @param out   to write bytes to
+   * 
+   * @param value
+   *          value to encode
+   * @param out
+   *          to write bytes to
    * @return the number of bytes written
-   * @throws IOException if {@link DataOutput} throws {@link IOException}
+   * @throws IOException
+   *           if {@link DataOutput} throws {@link IOException}
    */
   public static void writeUnsignedVarLong(long value, final BytesContainer bos) {
     int pos;
@@ -87,10 +93,13 @@ public class OVarIntSerializer {
   }
 
   /**
-   * @param in to read bytes from
+   * @param in
+   *          to read bytes from
    * @return decode value
-   * @throws IOException              if {@link DataInput} throws {@link IOException}
-   * @throws IllegalArgumentException if variable-length value does not terminate after 9 bytes have been read
+   * @throws IOException
+   *           if {@link DataInput} throws {@link IOException}
+   * @throws IllegalArgumentException
+   *           if variable-length value does not terminate after 9 bytes have been read
    * @see #writeSignedVarLong(long, DataOutput)
    */
   public static long readSignedVarLong(final BytesContainer bytes) {
@@ -105,10 +114,13 @@ public class OVarIntSerializer {
   }
 
   /**
-   * @param in to read bytes from
+   * @param in
+   *          to read bytes from
    * @return decode value
-   * @throws IOException              if {@link DataInput} throws {@link IOException}
-   * @throws IllegalArgumentException if variable-length value does not terminate after 9 bytes have been read
+   * @throws IOException
+   *           if {@link DataInput} throws {@link IOException}
+   * @throws IllegalArgumentException
+   *           if variable-length value does not terminate after 9 bytes have been read
    * @see #writeUnsignedVarLong(long, DataOutput)
    */
   public static long readUnsignedVarLong(final BytesContainer bytes) {
@@ -122,103 +134,6 @@ public class OVarIntSerializer {
         throw new IllegalArgumentException("Variable length quantity is too long (must be <= 63)");
     }
     return value | (b << i);
-  }
-
-  public static int writeUnsignedLong(long value, byte[] content, int pos) {
-    while (true) {
-      if ((value & ~0x7F) == 0) {
-        content[pos++] = (byte) value;
-        return pos;
-      } else {
-        content[pos++] = (byte) ((value & 0x7F) | 0x80);
-        value >>>= 7;
-      }
-    }
-  }
-
-  public static int[] readUnsignedInt(byte[] content, int pos) {
-    byte tmp = content[pos++];
-    if (tmp >= 0) {
-      return new int[] { tmp, pos };
-    }
-    int result = tmp & 0x7f;
-    if ((tmp = content[pos++]) >= 0) {
-      result |= tmp << 7;
-    } else {
-      result |= (tmp & 0x7f) << 7;
-      if ((tmp = content[pos++]) >= 0) {
-        result |= tmp << 14;
-      } else {
-        result |= (tmp & 0x7f) << 14;
-        if ((tmp = content[pos++]) >= 0) {
-          result |= tmp << 21;
-        } else {
-          result |= (tmp & 0x7f) << 21;
-          result |= (tmp = content[pos++]) << 28;
-          if (tmp < 0) {
-            // Discard upper 32 bits.
-            for (int i = 0; i < 5; i++) {
-              if (content[pos++] >= 0) {
-                return new int[] { result, pos };
-              }
-            }
-            throw new IllegalArgumentException("Illegal format of data");
-          }
-        }
-      }
-    }
-
-    return new int[] { result, pos };
-  }
-
-  public static long[] readUnsignedLong(byte[] content, int pos) {
-    int shift = 0;
-    long result = 0;
-    while (shift < 64) {
-      final byte b = content[pos++];
-      result |= (long) (b & 0x7F) << shift;
-      if ((b & 0x80) == 0) {
-
-        return new long[] { result, pos };
-      }
-      shift += 7;
-    }
-    throw new IllegalArgumentException("Illegal format of data");
-  }
-
-  public static int computeUnsignedIntSize(final int value) {
-    if ((value & (0xffffffff << 7)) == 0)
-      return 1;
-    if ((value & (0xffffffff << 14)) == 0)
-      return 2;
-    if ((value & (0xffffffff << 21)) == 0)
-      return 3;
-    if ((value & (0xffffffff << 28)) == 0)
-      return 4;
-
-    return 5;
-  }
-
-  public static int computeUnsignedLongSize(final long value) {
-    if ((value & (0xffffffffffffffffL << 7)) == 0)
-      return 1;
-    if ((value & (0xffffffffffffffffL << 14)) == 0)
-      return 2;
-    if ((value & (0xffffffffffffffffL << 21)) == 0)
-      return 3;
-    if ((value & (0xffffffffffffffffL << 28)) == 0)
-      return 4;
-    if ((value & (0xffffffffffffffffL << 35)) == 0)
-      return 5;
-    if ((value & (0xffffffffffffffffL << 42)) == 0)
-      return 6;
-    if ((value & (0xffffffffffffffffL << 49)) == 0)
-      return 7;
-    if ((value & (0xffffffffffffffffL << 56)) == 0)
-      return 8;
-    if ((value & (0xffffffffffffffffL << 63)) == 0)
-      return 9;
-    return 10;
   }
 
 }

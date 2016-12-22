@@ -21,7 +21,7 @@ public class OAtomicUnitEndRecordTest {
     Map<String, OAtomicOperationMetadata<?>> metadata = new LinkedHashMap<String, OAtomicOperationMetadata<?>>();
     metadata.put(recordOperationMetadata.getKey(), recordOperationMetadata);
 
-    OAtomicUnitEndRecord atomicUnitEndRecord = new OAtomicUnitEndRecord(OOperationUnitId.generateId(), metadata);
+    OAtomicUnitEndRecord atomicUnitEndRecord = new OAtomicUnitEndRecord(OOperationUnitId.generateId(), false, metadata);
     int arraySize = atomicUnitEndRecord.serializedSize() + 1;
     byte[] content = new byte[arraySize];
 
@@ -40,7 +40,7 @@ public class OAtomicUnitEndRecordTest {
   }
 
   public void recordNoMetadataSerializationTest() throws IOException {
-    OAtomicUnitEndRecord atomicUnitEndRecord = new OAtomicUnitEndRecord(OOperationUnitId.generateId(), null);
+    OAtomicUnitEndRecord atomicUnitEndRecord = new OAtomicUnitEndRecord(OOperationUnitId.generateId(), false, null);
     int arraySize = atomicUnitEndRecord.serializedSize() + 1;
     byte[] content = new byte[arraySize];
 

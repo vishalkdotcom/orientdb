@@ -4101,20 +4101,17 @@ public abstract class OAbstractPaginatedStorage extends OStorageAbstract
     for (OWALRecord walRecord : atomicUnit) {
       if (walRecord instanceof OFileDeletedWALRecord) {
         OFileDeletedWALRecord fileDeletedWALRecord = (OFileDeletedWALRecord) walRecord;
-        long fileId = writeCache.externalFileId(fileDeletedWALRecord.getFileId());
-        if (writeCache.exists(fileId))
-          readCache.deleteFile(fileId, writeCache);
-
+        if (writeCache.exists(fileDeletedWALRecord.getFileId()))
+          readCache.deleteFile(fileDeletedWALRecord.getFileId(), writeCache);
       } else if (walRecord instanceof OFileCreatedWALRecord) {
         OFileCreatedWALRecord fileCreatedCreatedWALRecord = (OFileCreatedWALRecord) walRecord;
         if (!writeCache.exists(fileCreatedCreatedWALRecord.getFileName())) {
-          readCache.addFile(fileCreatedCreatedWALRecord.getFileName(),
-              writeCache.externalFileId(fileCreatedCreatedWALRecord.getFileId()), writeCache);
+          readCache.addFile(fileCreatedCreatedWALRecord.getFileName(), fileCreatedCreatedWALRecord.getFileId(), writeCache);
         }
       } else if (walRecord instanceof OUpdatePageRecord) {
         final OUpdatePageRecord updatePageRecord = (OUpdatePageRecord) walRecord;
 
-        long fileId = writeCache.externalFileId(updatePageRecord.getFileId());
+        long fileId = updatePageRecord.getFileId();
 
         final long pageIndex = updatePageRecord.getPageIndex();
         fileId = writeCache.externalFileId(writeCache.internalFileId(fileId));

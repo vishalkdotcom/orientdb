@@ -1,14 +1,14 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
-import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
+import com.orientechnologies.common.serialization.types.OLongSerializer;
 
 public class OFileTruncatedWALRecord extends OOperationUnitBodyRecord {
-  private int fileId;
+  private long fileId;
 
   public OFileTruncatedWALRecord() {
   }
 
-  public OFileTruncatedWALRecord(OOperationUnitId operationUnitId, int fileId) {
+  public OFileTruncatedWALRecord(OOperationUnitId operationUnitId, long fileId) {
     super(operationUnitId);
     this.fileId = fileId;
   }
@@ -21,7 +21,8 @@ public class OFileTruncatedWALRecord extends OOperationUnitBodyRecord {
   public int toStream(byte[] content, int offset) {
     offset = super.toStream(content, offset);
 
-    offset = OVarIntSerializer.writeUnsignedLong(fileId, content, offset);
+    OLongSerializer.INSTANCE.serializeNative(fileId, content, offset);
+    offset += OLongSerializer.LONG_SIZE;
 
     return offset;
   }
@@ -30,16 +31,15 @@ public class OFileTruncatedWALRecord extends OOperationUnitBodyRecord {
   public int fromStream(byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
-    int[] res = OVarIntSerializer.readUnsignedInt(content, offset);
-    fileId = res[0];
-    offset = res[1];
+    fileId = OLongSerializer.INSTANCE.deserializeNative(content, offset);
+    offset += OLongSerializer.LONG_SIZE;
 
     return offset;
   }
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + OVarIntSerializer.computeUnsignedIntSize(fileId);
+    return super.serializedSize() + OLongSerializer.LONG_SIZE;
   }
 
   @Override

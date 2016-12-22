@@ -21,7 +21,6 @@
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
 import com.orientechnologies.common.serialization.types.OLongSerializer;
-import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin
@@ -29,12 +28,12 @@ import com.orientechnologies.orient.core.serialization.serializer.record.binary.
  */
 public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
   private long pageIndex;
-  private int  fileId;
+  private long fileId;
 
   protected OAbstractPageWALRecord() {
   }
 
-  protected OAbstractPageWALRecord(long pageIndex, int fileId, OOperationUnitId operationUnitId) {
+  protected OAbstractPageWALRecord(long pageIndex, long fileId, OOperationUnitId operationUnitId) {
     super(operationUnitId);
     this.pageIndex = pageIndex;
     this.fileId = fileId;
@@ -44,8 +43,11 @@ public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
   public int toStream(byte[] content, int offset) {
     offset = super.toStream(content, offset);
 
-    offset = OVarIntSerializer.writeUnsignedLong(pageIndex, content, offset);
-    offset = OVarIntSerializer.writeUnsignedLong(fileId, content, offset);
+    OLongSerializer.INSTANCE.serializeNative(pageIndex, content, offset);
+    offset += OLongSerializer.LONG_SIZE;
+
+    OLongSerializer.INSTANCE.serializeNative(fileId, content, offset);
+    offset += OLongSerializer.LONG_SIZE;
 
     return offset;
   }
@@ -54,28 +56,25 @@ public abstract class OAbstractPageWALRecord extends OOperationUnitBodyRecord {
   public int fromStream(byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
-    long[] res = OVarIntSerializer.readUnsignedLong(content, offset);
-    pageIndex = res[0];
-    offset = (int) res[1];
+    pageIndex = OLongSerializer.INSTANCE.deserializeNative(content, offset);
+    offset += OLongSerializer.LONG_SIZE;
 
-    int[] fres = OVarIntSerializer.readUnsignedInt(content, offset);
-    fileId = fres[0];
-    offset = fres[1];
+    fileId = OLongSerializer.INSTANCE.deserializeNative(content, offset);
+    offset += OLongSerializer.LONG_SIZE;
 
     return offset;
   }
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + OVarIntSerializer.computeUnsignedIntSize(fileId) + OVarIntSerializer
-        .computeUnsignedLongSize(pageIndex);
+    return super.serializedSize() + 2 * OLongSerializer.LONG_SIZE;
   }
 
   public long getPageIndex() {
     return pageIndex;
   }
 
-  public int getFileId() {
+  public long getFileId() {
     return fileId;
   }
 

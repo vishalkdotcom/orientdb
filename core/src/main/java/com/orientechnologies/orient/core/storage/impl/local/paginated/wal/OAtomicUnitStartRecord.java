@@ -27,17 +27,27 @@ import com.orientechnologies.common.serialization.types.OByteSerializer;
  * @since 24.05.13
  */
 public class OAtomicUnitStartRecord extends OOperationUnitRecord {
+  private boolean isRollbackSupported;
 
   public OAtomicUnitStartRecord() {
   }
 
-  OAtomicUnitStartRecord(final OOperationUnitId unitId) {
+  OAtomicUnitStartRecord(final boolean isRollbackSupported, final OOperationUnitId unitId) {
     super(unitId);
+    this.isRollbackSupported = isRollbackSupported;
+  }
+
+  public boolean isRollbackSupported() {
+    return isRollbackSupported;
   }
 
   @Override
   public int toStream(final byte[] content, int offset) {
     offset = super.toStream(content, offset);
+
+    content[offset] = isRollbackSupported ? (byte) 1 : 0;
+    offset++;
+
     return offset;
 
   }
@@ -45,16 +55,25 @@ public class OAtomicUnitStartRecord extends OOperationUnitRecord {
   @Override
   public int fromStream(final byte[] content, int offset) {
     offset = super.fromStream(content, offset);
+
+    isRollbackSupported = content[offset] > 0;
+    offset++;
+
     return offset;
   }
 
   @Override
   public int serializedSize() {
-    return super.serializedSize();
+    return super.serializedSize() + OByteSerializer.BYTE_SIZE;
   }
 
   @Override
   public boolean isUpdateMasterRecord() {
     return false;
+  }
+
+  @Override
+  public String toString() {
+    return toString("isRollbackSupported=" + isRollbackSupported);
   }
 }

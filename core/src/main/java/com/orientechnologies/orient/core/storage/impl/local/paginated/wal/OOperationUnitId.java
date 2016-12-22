@@ -15,25 +15,25 @@
  */
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.orientechnologies.common.serialization.types.OLongSerializer;
 import com.orientechnologies.common.types.OModifiableLong;
 import com.orientechnologies.orient.core.OOrientListenerAbstract;
 import com.orientechnologies.orient.core.Orient;
-import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin
  * @since 06.06.13
  */
 public class OOperationUnitId {
-  private static final AtomicLong sharedId = new AtomicLong();
+  private static final AtomicLong                      sharedId        = new AtomicLong();
 
-  private static volatile ThreadLocal<OModifiableLong> localId      = new ThreadLocal<OModifiableLong>();
-  private static volatile ThreadLocal<Long>            sharedIdCopy = new ThreadLocal<Long>();
+  private static volatile ThreadLocal<OModifiableLong> localId         = new ThreadLocal<OModifiableLong>();
+  private static volatile ThreadLocal<Long>            sharedIdCopy    = new ThreadLocal<Long>();
 
-  public static final int SERIALIZED_SIZE = 2 * OLongSerializer.LONG_SIZE;
+  public static final int                              SERIALIZED_SIZE = 2 * OLongSerializer.LONG_SIZE;
 
   static {
     Orient.instance().registerListener(new OOrientListenerAbstract() {
@@ -54,8 +54,8 @@ public class OOperationUnitId {
     });
   }
 
-  private long lId;
-  private long sId;
+  private long                                         lId;
+  private long                                         sId;
 
   public OOperationUnitId(long lId, long sId) {
     this.lId = lId;
@@ -105,31 +105,6 @@ public class OOperationUnitId {
     offset += OLongSerializer.LONG_SIZE;
 
     return offset;
-  }
-
-  public int toStreamVarInt(byte[] content, int offset) {
-    offset = OVarIntSerializer.writeUnsignedLong(sId, content, offset);
-    offset = OVarIntSerializer.writeUnsignedLong(lId, content, offset);
-
-    return offset;
-  }
-
-  public int fromStreamVarInt(byte[] content, int offset) {
-    long res[] = OVarIntSerializer.readUnsignedLong(content, offset);
-
-    sId = res[0];
-    offset = (int) res[1];
-
-    res = OVarIntSerializer.readUnsignedLong(content, offset);
-    lId = res[0];
-
-    offset = (int) res[1];
-
-    return offset;
-  }
-
-  public int varIntSize() {
-    return OVarIntSerializer.computeUnsignedLongSize(sId) + OVarIntSerializer.computeUnsignedLongSize(lId);
   }
 
   @Override

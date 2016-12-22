@@ -35,18 +35,18 @@ public abstract class OOperationUnitRecord extends OAbstractWALRecord {
 
   @Override
   public int toStream(final byte[] content, final int offset) {
-    return operationUnitId.toStreamVarInt(content, offset);
+    return operationUnitId.toStream(content, offset);
   }
 
   @Override
   public int fromStream(final byte[] content, final int offset) {
     operationUnitId = new OOperationUnitId();
-    return operationUnitId.fromStreamVarInt(content, offset);
+    return operationUnitId.fromStream(content, offset);
   }
 
   @Override
   public int serializedSize() {
-    return operationUnitId.varIntSize();
+    return OOperationUnitId.SERIALIZED_SIZE;
   }
 
   @Override

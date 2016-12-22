@@ -22,6 +22,7 @@ package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -39,13 +40,18 @@ import com.orientechnologies.orient.core.storage.impl.local.paginated.atomicoper
  * @since 24.05.13
  */
 public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
+  private boolean                                  rollback;
+
   private Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap = new LinkedHashMap<String, OAtomicOperationMetadata<?>>();
 
   public OAtomicUnitEndRecord() {
   }
 
-  OAtomicUnitEndRecord(final OOperationUnitId operationUnitId, final Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap) throws IOException {
+  OAtomicUnitEndRecord(final OOperationUnitId operationUnitId, final boolean rollback,
+      final Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap) throws IOException {
     super(operationUnitId);
+
+    this.rollback = rollback;
 
     assert operationUnitId != null;
 
@@ -54,9 +60,16 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
     }
   }
 
+  public boolean isRollback() {
+    return rollback;
+  }
+
   @Override
   public int toStream(final byte[] content, int offset) {
     offset = super.toStream(content, offset);
+
+    content[offset] = rollback ? (byte) 1 : 0;
+    offset++;
 
     if (atomicOperationMetadataMap.size() > 0) {
       for (Map.Entry<String, OAtomicOperationMetadata<?>> entry : atomicOperationMetadataMap.entrySet()) {
@@ -91,6 +104,9 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
   public int fromStream(final byte[] content, int offset) {
     offset = super.fromStream(content, offset);
 
+    rollback = content[offset] > 0;
+    offset++;
+
     atomicOperationMetadataMap = new LinkedHashMap<String, OAtomicOperationMetadata<?>>();
 
     final int metadataId = content[offset];
@@ -124,7 +140,7 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + metadataSize();
+    return super.serializedSize() + OByteSerializer.BYTE_SIZE + metadataSize();
   }
 
   private int metadataSize() {
@@ -148,5 +164,10 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
   @Override
   public boolean isUpdateMasterRecord() {
     return false;
+  }
+
+  @Override
+  public String toString() {
+    return toString("rollback=" + rollback);
   }
 }
