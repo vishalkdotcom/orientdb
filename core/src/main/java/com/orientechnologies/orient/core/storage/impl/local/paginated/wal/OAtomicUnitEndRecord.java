@@ -22,7 +22,6 @@ package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -45,8 +44,7 @@ public class OAtomicUnitEndRecord extends OOperationUnitBodyRecord {
   public OAtomicUnitEndRecord() {
   }
 
-  OAtomicUnitEndRecord(final OOperationUnitId operationUnitId, final boolean rollback,
-      final Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap) throws IOException {
+  OAtomicUnitEndRecord(final OOperationUnitId operationUnitId, final Map<String, OAtomicOperationMetadata<?>> atomicOperationMetadataMap) throws IOException {
     super(operationUnitId);
 
     assert operationUnitId != null;

@@ -361,7 +361,7 @@ public class OAtomicOperation {
     try {
       if (writeAheadLog != null) {
         for (long deletedFileId : deletedFiles) {
-          writeAheadLog.log(new OFileDeletedWALRecord(operationUnitId, deletedFileId));
+          writeAheadLog.log(new OFileDeletedWALRecord(operationUnitId, writeCache.internalFileId(deletedFileId)));
         }
 
         for (Map.Entry<Long, FileChanges> fileChangesEntry : fileChanges.entrySet()) {
@@ -369,9 +369,9 @@ public class OAtomicOperation {
           final long fileId = fileChangesEntry.getKey();
 
           if (fileChanges.isNew)
-            writeAheadLog.log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, fileId));
+            writeAheadLog.log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, writeCache.internalFileId(fileId)));
           else if (fileChanges.truncate)
-            writeAheadLog.log(new OFileTruncatedWALRecord(operationUnitId, fileId));
+            writeAheadLog.log(new OFileTruncatedWALRecord(operationUnitId, writeCache.internalFileId(fileId)));
           Iterator<Map.Entry<Long, FilePageChanges>> filePageChangesIterator = fileChanges.pageChangesMap.entrySet().iterator();
           while (filePageChangesIterator.hasNext()) {
             Map.Entry<Long, FilePageChanges> filePageChangesEntry = filePageChangesIterator.next();
@@ -380,8 +380,8 @@ public class OAtomicOperation {
               final long pageIndex = filePageChangesEntry.getKey();
               final FilePageChanges filePageChanges = filePageChangesEntry.getValue();
 
-              filePageChanges.lsn = writeAheadLog
-                  .log(new OUpdatePageRecord(pageIndex, fileId, operationUnitId, filePageChanges.changes));
+              filePageChanges.lsn = writeAheadLog.log(
+                  new OUpdatePageRecord(pageIndex, writeCache.internalFileId(fileId), operationUnitId, filePageChanges.changes));
             } else
               filePageChangesIterator.remove();
           }
@@ -560,7 +560,7 @@ public class OAtomicOperation {
       try {
         if (writeAheadLog != null) {
           for (long deletedFileId : deletedFiles) {
-            writeAheadLog.log(new OFileDeletedWALRecord(operationUnitId, deletedFileId));
+            writeAheadLog.log(new OFileDeletedWALRecord(operationUnitId, writeCache.internalFileId(deletedFileId)));
           }
 
           for (Map.Entry<Long, FileChanges> fileChangesEntry : fileChanges.entrySet()) {
@@ -568,9 +568,10 @@ public class OAtomicOperation {
             final long fileId = fileChangesEntry.getKey();
 
             if (fileChanges.isNew)
-              writeAheadLog.log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, fileId));
+              writeAheadLog
+                  .log(new OFileCreatedWALRecord(operationUnitId, fileChanges.fileName, writeCache.internalFileId(fileId)));
             else if (fileChanges.truncate)
-              writeAheadLog.log(new OFileTruncatedWALRecord(operationUnitId, fileId));
+              writeAheadLog.log(new OFileTruncatedWALRecord(operationUnitId, writeCache.internalFileId(fileId)));
             Iterator<Map.Entry<Long, FilePageChanges>> filePageChangesIterator = fileChanges.pageChangesMap.entrySet().iterator();
             while (filePageChangesIterator.hasNext()) {
               Map.Entry<Long, FilePageChanges> filePageChangesEntry = filePageChangesIterator.next();
@@ -579,8 +580,8 @@ public class OAtomicOperation {
                 final long pageIndex = filePageChangesEntry.getKey();
                 final FilePageChanges filePageChanges = filePageChangesEntry.getValue();
 
-                filePageChanges.lsn = writeAheadLog
-                    .log(new OUpdatePageRecord(pageIndex, fileId, operationUnitId, filePageChanges.changes));
+                filePageChanges.lsn = writeAheadLog.log(
+                    new OUpdatePageRecord(pageIndex, writeCache.internalFileId(fileId), operationUnitId, filePageChanges.changes));
               } else
                 filePageChangesIterator.remove();
             }

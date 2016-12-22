@@ -287,12 +287,13 @@ public class OSBTreeBonsaiWALTest extends OSBTreeBonsaiLocalTest {
             final String fileName = fileCreatedCreatedRecord.getFileName().replace("actualSBTree", "expectedSBTree");
 
             if (!expectedWriteCache.exists(fileName))
-              expectedReadCache.addFile(fileName, fileCreatedCreatedRecord.getFileId(), expectedWriteCache);
+              expectedReadCache
+                  .addFile(fileName, expectedWriteCache.externalFileId(fileCreatedCreatedRecord.getFileId()), expectedWriteCache);
 
           } else {
             final OUpdatePageRecord updatePageRecord = (OUpdatePageRecord) restoreRecord;
 
-            final long fileId = updatePageRecord.getFileId();
+            final long fileId = expectedWriteCache.externalFileId(updatePageRecord.getFileId());
             final long pageIndex = updatePageRecord.getPageIndex();
 
             OCacheEntry cacheEntry = expectedReadCache.loadForWrite(fileId, pageIndex, true, expectedWriteCache, 1);

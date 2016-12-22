@@ -396,7 +396,7 @@ public class ODiskWriteAheadLog extends OAbstractWriteAheadLog {
     if (statistic != null)
       statistic.startWALLogRecordTimer();
     try {
-      OAtomicUnitEndRecord record = new OAtomicUnitEndRecord(operationUnitId, rollback, atomicOperationMetadata);
+      OAtomicUnitEndRecord record = new OAtomicUnitEndRecord(operationUnitId, atomicOperationMetadata);
       byte[] content = OWALRecordsFactory.INSTANCE.toStream(record);
       syncObject.lock();
       try {

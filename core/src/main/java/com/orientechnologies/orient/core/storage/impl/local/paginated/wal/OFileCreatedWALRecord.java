@@ -20,8 +20,8 @@
 
 package com.orientechnologies.orient.core.storage.impl.local.paginated.wal;
 
-import com.orientechnologies.common.serialization.types.OLongSerializer;
 import com.orientechnologies.common.serialization.types.OStringSerializer;
+import com.orientechnologies.orient.core.serialization.serializer.record.binary.OVarIntSerializer;
 
 /**
  * @author Andrey Lomakin (a.lomakin-at-orientechnologies.com)
@@ -29,12 +29,12 @@ import com.orientechnologies.common.serialization.types.OStringSerializer;
  */
 public class OFileCreatedWALRecord extends OOperationUnitBodyRecord {
   private String fileName;
-  private long   fileId;
+  private int    fileId;
 
   public OFileCreatedWALRecord() {
   }
 
-  public OFileCreatedWALRecord(OOperationUnitId operationUnitId, String fileName, long fileId) {
+  public OFileCreatedWALRecord(OOperationUnitId operationUnitId, String fileName, int fileId) {
     super(operationUnitId);
     this.fileName = fileName;
     this.fileId = fileId;
@@ -44,7 +44,7 @@ public class OFileCreatedWALRecord extends OOperationUnitBodyRecord {
     return fileName;
   }
 
-  public long getFileId() {
+  public int getFileId() {
     return fileId;
   }
 
@@ -55,8 +55,7 @@ public class OFileCreatedWALRecord extends OOperationUnitBodyRecord {
     OStringSerializer.INSTANCE.serializeNativeObject(fileName, content, offset);
     offset += OStringSerializer.INSTANCE.getObjectSize(fileName);
 
-    OLongSerializer.INSTANCE.serializeNative(fileId, content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    offset = OVarIntSerializer.writeUnsignedLong(fileId, content, offset);
 
     return offset;
   }
@@ -68,15 +67,17 @@ public class OFileCreatedWALRecord extends OOperationUnitBodyRecord {
     fileName = OStringSerializer.INSTANCE.deserializeNativeObject(content, offset);
     offset += OStringSerializer.INSTANCE.getObjectSize(fileName);
 
-    fileId = OLongSerializer.INSTANCE.deserializeNative(content, offset);
-    offset += OLongSerializer.LONG_SIZE;
+    int[] res = OVarIntSerializer.readUnsignedInt(content, offset);
+    fileId = res[0];
+    offset = res[1];
 
     return offset;
   }
 
   @Override
   public int serializedSize() {
-    return super.serializedSize() + OStringSerializer.INSTANCE.getObjectSize(fileName) + OLongSerializer.LONG_SIZE;
+    return super.serializedSize() + OStringSerializer.INSTANCE.getObjectSize(fileName) +
+        OVarIntSerializer.computeUnsignedIntSize(fileId);
   }
 
   @Override
