@@ -9,7 +9,11 @@ import java.io.Closeable;
  */
 public interface ODatabasePool extends AutoCloseable {
 
-  static ODatabasePool pool(String url) {
+  static ODatabasePool open(String url, String user, String password) {
+    return new ODatabasePoolWrapper(url, user, password);
+  }
+
+  static ODatabasePool open(String url) {
     return new ODatabasePoolWrapper(url);
   }
 

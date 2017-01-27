@@ -3,8 +3,8 @@ package com.orientechnologies.orient.core.db;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 
 /**
- * Created by tglman on 23/01/17.
+ * Created by tglman on 27/01/17.
  */
-public interface ODatabaseCallable<T> {
-  T call(ODatabaseDocument database);
+public interface ODatabaseRunnable {
+  void run(ODatabaseDocument database);
 }

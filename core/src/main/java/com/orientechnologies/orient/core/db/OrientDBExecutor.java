@@ -1,8 +1,6 @@
 package com.orientechnologies.orient.core.db;
 
 import java.io.Closeable;
-import java.io.IOException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -12,9 +10,13 @@ import java.util.concurrent.Future;
  */
 public interface OrientDBExecutor extends Closeable {
 
-  static OrientDBExecutor databaseExecutor(String url) {
-    return new OrientDBExecutorImpl(ODatabasePool.pool(url),
+  static OrientDBExecutor databaseExecutor(String url, String user, String password) {
+    return new OrientDBExecutorImpl(ODatabasePool.open(url, user, password),
         Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()));
+  }
+
+  static OrientDBExecutor databaseExecutor(ODatabasePool pool) {
+    return databaseExecutor(pool, Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()));
   }
 
   static OrientDBExecutor databaseExecutor(ODatabasePool pool, ExecutorService executor) {
@@ -22,6 +24,13 @@ public interface OrientDBExecutor extends Closeable {
   }
 
   <T> Future<T> submit(ODatabaseCallable<T> callable);
+
+  default void submit(ODatabaseRunnable runnable) {
+    this.<Void>submit((database) -> {
+      runnable.run(database);
+      return (Void) null;
+    });
+  }
 
   void close();
 }
