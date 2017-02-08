@@ -20,9 +20,6 @@
 
 package com.orientechnologies.orient.server.distributed;
 
-import com.orientechnologies.orient.core.db.ODatabasePool;
-import com.orientechnologies.orient.core.db.OrientDB;
-import com.orientechnologies.orient.core.db.OrientDBConfig;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.record.OVertex;
@@ -49,9 +46,7 @@ public class ReplicaServerTest extends AbstractServerClusterTest {
   @Override
   protected void executeTest() throws Exception {
     for (int s = 0; s < SERVERS; ++s) {
-      ODatabasePool factory = OrientDB.fromUrl("embedded:target/server" + s + "/databases/", OrientDBConfig.defaultConfig())
-          .openPool(getDatabaseName(), "admin", "admin");
-      ODatabaseDocument g = factory.acquire();
+      ODatabaseDocument g = serverInstance.get(s).getServerInstance().openDatabase(getDatabaseName(), "admin", "admin");
 
       try {
         System.out.println("Creating vertex class Client" + s + " against server " + g + "...");
@@ -72,10 +67,7 @@ public class ReplicaServerTest extends AbstractServerClusterTest {
     for (int s = 0; s < SERVERS; ++s) {
       System.out.println("Add vertices on server " + s + "...");
 
-      ODatabasePool factory = OrientDB.fromUrl("embedded:target/server" + s + "/databases/", OrientDBConfig.defaultConfig())
-          .openPool(getDatabaseName(), "admin", "admin");
-
-      ODatabaseDocument g = factory.acquire();
+      ODatabaseDocument g = serverInstance.get(s).getServerInstance().openDatabase(getDatabaseName(), "admin", "admin");
 
       try {
         final OVertex v = g.newVertex("Client" + s);
@@ -92,11 +84,7 @@ public class ReplicaServerTest extends AbstractServerClusterTest {
     for (int s = 0; s < SERVERS; ++s) {
       System.out.println("Add vertices in TX on server " + s + "...");
 
-
-      ODatabasePool factory = OrientDB.fromUrl("embedded:target/server" + s + "/databases/", OrientDBConfig.defaultConfig())
-          .openPool(getDatabaseName(), "admin", "admin");
-
-      ODatabaseDocument g = factory.acquire();
+      ODatabaseDocument g = serverInstance.get(s).getServerInstance().openDatabase(getDatabaseName(), "admin", "admin");
       g.begin();
 
       try {
