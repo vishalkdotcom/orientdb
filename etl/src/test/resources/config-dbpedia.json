@@ -13,7 +13,7 @@
       }
     },
     {
-      let: {
+      "let": {
         "name": "$className",
         "expression": "$fileName.substring( 0, $fileName.indexOf('.') )"
       }
